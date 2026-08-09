@@ -1,0 +1,625 @@
+#include "GameScene.h"
+#include "Matrix4x4Calculation.h"
+#include <algorithm>
+#include <cmath>
+#include <numbers>
+#ifdef USE_IMGUI
+#include <imgui.h>
+#endif
+
+using namespace KamataEngine;
+
+void GameScene::Initialize() {
+	mapChipField_ = new MapChipField();
+	mapChipField_->Initialize("mapChip", "Resources/mapchip.csv", 1.0f, 1.0f);
+
+	player_ = new Player();
+	player_->Initialize();
+	player_->SetMapChipField(mapChipField_);
+	// The title and game share the same world. Starting at the camera center makes
+	// the title-to-play transition continuous instead of repositioning the player.
+	player_->SetPosition({kTitlePlayerX, 2.401f, 0.0f});
+
+	cameraController_ = new CameraController();
+	cameraController_->Initialize();
+	cameraController_->GetCamera().farZ = 2000.0f;
+	cameraController_->SetPlayer(player_);
+	// These bounds match the camera frustum at Z=-15, so neither horizontal
+	// outside space nor empty space below the floor can enter the view.
+	cameraController_->SetMovableArea({
+	    kCameraViewHalfWidth,
+	    60.0f - kCameraViewHalfWidth,
+	    kCameraViewHalfHeight,
+	    20.0f - kCameraViewHalfHeight});
+	cameraController_->ResetCameraPosition();
+
+	skydome_ = new Skydome();
+	skydome_->Initialize();
+	bossArmature_ = new BossArmature();
+	bossArmature_->Initialize();
+	bossArmature_->SetAIEnabled(false);
+	dialogueSystem_ = new DialogueSystem();
+	dialogueSystem_->Initialize(
+	    kBossDialoguePageCount,
+	    {
+	        // Add each complete dialogue-box sprite here later, in page order.
+	        // Example: "dialogue/boss_01.png",
+	    });
+	victoryDialogueSystem_ = new DialogueSystem();
+	victoryDialogueSystem_->Initialize(
+	    1,
+	    {
+	        // Add the full-screen post-boss dialogue sprite here later.
+	        // Example: "dialogue/boss_defeated.png",
+	    },
+	    1.0f);
+	defeatParticleModel_ = Model::CreateSphere(6, 6);
+	defeatParticleColor_.Initialize();
+	defeatParticleColor_.SetColor({1.0f, 0.24f, 0.06f, 0.90f});
+	for (DefeatParticle& particle : defeatParticles_) {
+		particle.transform.Initialize();
+		particle.active = false;
+	}
+	const uint32_t titleLogoTexture = TextureManager::Load("game1.png");
+	titleLogo_ = Sprite::Create(
+	    titleLogoTexture,
+	    {static_cast<float>(WinApp::kWindowWidth) * 0.5f, 165.0f},
+	    {1.0f, 1.0f, 1.0f, 1.0f},
+	    {0.5f, 0.5f});
+	titleLogo_->SetSize({500.0f, 116.0f});
+	const uint32_t healthBarTexture = TextureManager::Load("white1x1.png");
+	playerHealthFrame_ = Sprite::Create(healthBarTexture, {0.0f, 0.0f}, {0.03f, 0.02f, 0.02f, 0.0f}, {0.0f, 0.5f});
+	playerHealthBackground_ = Sprite::Create(healthBarTexture, {0.0f, 0.0f}, {0.025f, 0.09f, 0.035f, 0.0f}, {0.0f, 0.5f});
+	playerHealthFill_ = Sprite::Create(healthBarTexture, {0.0f, 0.0f}, {0.08f, 0.72f, 0.16f, 0.0f}, {0.0f, 0.5f});
+	bossHealthFrame_ = Sprite::Create(healthBarTexture, {0.0f, 0.0f}, {0.025f, 0.015f, 0.015f, 0.0f}, {0.5f, 0.5f});
+	bossHealthBackground_ = Sprite::Create(healthBarTexture, {0.0f, 0.0f}, {0.10f, 0.025f, 0.025f, 0.0f}, {0.5f, 0.5f});
+	bossHealthFill_ = Sprite::Create(healthBarTexture, {0.0f, 0.0f}, {0.72f, 0.02f, 0.02f, 0.0f}, {0.0f, 0.5f});
+	blackOverlay_ = Sprite::Create(healthBarTexture, {0.0f, 0.0f}, {0.0f, 0.0f, 0.0f, 0.0f});
+	blackOverlay_->SetSize({static_cast<float>(WinApp::kWindowWidth), static_cast<float>(WinApp::kWindowHeight)});
+	whiteFlashOverlay_ = Sprite::Create(healthBarTexture, {0.0f, 0.0f}, {1.0f, 1.0f, 1.0f, 0.0f});
+	whiteFlashOverlay_->SetSize({static_cast<float>(WinApp::kWindowWidth), static_cast<float>(WinApp::kWindowHeight)});
+	for (Sprite*& rangeSprite : bossRangeSprites_) {
+		rangeSprite = Sprite::Create(healthBarTexture, {0.0f, 0.0f}, {1.0f, 1.0f, 1.0f, 0.0f});
+	}
+	flowState_ = FlowState::kTitle;
+	endType_ = EndType::kNone;
+	endPhase_ = EndPhase::kNone;
+	titleFadeTimer_ = 0.0f;
+	healthBarAppearTimer_ = 0.0f;
+	damageInvincibilityTimer_ = 0.0f;
+	endPhaseTimer_ = 0.0f;
+	blackOverlayAlpha_ = 0.0f;
+	whiteFlashAlpha_ = 0.0f;
+	playerHealth_ = kPlayerMaximumHealth;
+	bossHealth_ = kBossMaximumHealth;
+	playerHealthRatio_ = 1.0f;
+	bossHealthRatio_ = 1.0f;
+	healthBarsVisible_ = false;
+	playerAttackHitBoss_ = false;
+	showBossRangeVisual_ = false;
+	showCollisionDebug_ = false;
+	restartToTitleRequested_ = false;
+	resultContinueRequested_ = false;
+	bossEncounterStarted_ = false;
+	bossDialogueStarted_ = false;
+	bossAIStarted_ = false;
+	mapChipField_->Update();
+	skydome_->Update(cameraController_->GetCamera());
+}
+
+void GameScene::Update() {
+	if (flowState_ != FlowState::kPlay) {
+		UpdateTitle();
+		return;
+	}
+	if (endType_ != EndType::kNone) {
+		UpdateEndSequence();
+		UpdateHealthBars();
+		mapChipField_->Update();
+		skydome_->Update(cameraController_->GetCamera());
+		return;
+	}
+
+	// Freeze the player while the camera settles and while dialogue is active.
+	if (!bossEncounterStarted_ || bossAIStarted_) { player_->Update(); }
+	cameraController_->Update();
+	const float visibleRightEdge = cameraController_->GetCamera().translation_.x + kCameraViewHalfWidth;
+	if (!bossEncounterStarted_ && visibleRightEdge >= kBossVisibleLeftX) {
+		StartBossEncounter();
+	}
+	if (bossEncounterStarted_ && !bossDialogueStarted_ && cameraController_->IsLockComplete()) {
+		bossDialogueStarted_ = true;
+		dialogueSystem_->Start();
+	}
+	if (bossDialogueStarted_ && !bossAIStarted_) {
+		dialogueSystem_->Update();
+		if (dialogueSystem_->IsFinished()) { StartBossCombat(); }
+	}
+	bossArmature_->Update(player_->GetWorldTransform().translation_);
+	if (bossAIStarted_) {
+		UpdateCombatCollisions();
+		if (endType_ == EndType::kNone) { ResolveBossBodyCollision(); }
+	}
+	UpdateHealthBars();
+#ifdef USE_IMGUI
+	bossArmature_->DrawImGui();
+	DrawCombatImGui();
+#endif
+	mapChipField_->Update();
+	skydome_->Update(cameraController_->GetCamera());
+}
+
+void GameScene::StartBossCombat() {
+	bossAIStarted_ = true;
+	bossArmature_->SetAIEnabled(true);
+	StartHealthBarEntrance();
+}
+
+bool GameScene::Overlaps(
+    const Vector3& minA,
+    const Vector3& maxA,
+    const Vector3& minB,
+    const Vector3& maxB) {
+	return minA.x <= maxB.x && maxA.x >= minB.x && minA.y <= maxB.y && maxA.y >= minB.y && minA.z <= maxB.z && maxA.z >= minB.z;
+}
+
+void GameScene::UpdateCombatCollisions() {
+	damageInvincibilityTimer_ = (std::max)(0.0f, damageInvincibilityTimer_ - kFrameTime);
+	const BossArmature::CollisionBox bossBody = bossArmature_->GetBodyHitbox();
+
+	if (!player_->IsAttackActive()) {
+		playerAttackHitBoss_ = false;
+	} else if (!playerAttackHitBoss_) {
+		const Player::AttackHitbox attack = player_->GetAttackHitbox();
+		if (Overlaps(attack.min, attack.max, bossBody.min, bossBody.max)) {
+			playerAttackHitBoss_ = true;
+			bossHealth_ = (std::max)(0, bossHealth_ - kPlayerAttackDamage);
+			bossHealthRatio_ = static_cast<float>(bossHealth_) / static_cast<float>(kBossMaximumHealth);
+			if (bossHealth_ <= 0) {
+				StartBossDefeat();
+				return;
+			}
+		}
+	}
+
+	if (damageInvincibilityTimer_ > 0.0f) { return; }
+	const Player::AttackHitbox playerBody = player_->GetBodyHitbox();
+	const bool scytheHit = bossArmature_->IsScytheAttackActive() && [&]() {
+		const BossArmature::CollisionBox scythe = bossArmature_->GetScytheHitbox();
+		return Overlaps(playerBody.min, playerBody.max, scythe.min, scythe.max);
+	}();
+	const bool bodyHit = Overlaps(playerBody.min, playerBody.max, bossBody.min, bossBody.max);
+	if (!scytheHit && !bodyHit) { return; }
+
+	playerHealth_ = (std::max)(0, playerHealth_ - (scytheHit ? kScytheDamage : kBossBodyDamage));
+	playerHealthRatio_ = static_cast<float>(playerHealth_) / static_cast<float>(kPlayerMaximumHealth);
+	damageInvincibilityTimer_ = kDamageInvincibilityDuration;
+	if (playerHealth_ <= 0) { StartPlayerDefeat(); }
+}
+
+void GameScene::ResolveBossBodyCollision() {
+	const Player::AttackHitbox playerBody = player_->GetBodyHitbox();
+	const BossArmature::CollisionBox bossBody = bossArmature_->GetBodyHitbox();
+	if (!Overlaps(playerBody.min, playerBody.max, bossBody.min, bossBody.max)) { return; }
+
+	const float playerHalfWidth = (playerBody.max.x - playerBody.min.x) * 0.5f;
+	const float playerCenterX = (playerBody.min.x + playerBody.max.x) * 0.5f;
+	const float bossCenterX = (bossBody.min.x + bossBody.max.x) * 0.5f;
+	const float correctedX = playerCenterX < bossCenterX ? bossBody.min.x - playerHalfWidth : bossBody.max.x + playerHalfWidth;
+	player_->ResolveHorizontalPush(correctedX);
+}
+
+float GameScene::SmoothStep(float t) {
+	t = std::clamp(t, 0.0f, 1.0f);
+	return t * t * t * (t * (t * 6.0f - 15.0f) + 10.0f);
+}
+
+void GameScene::StartPlayerDefeat() {
+	if (endType_ != EndType::kNone) { return; }
+	playerHealth_ = 0;
+	playerHealthRatio_ = 0.0f;
+	endType_ = EndType::kPlayerDefeat;
+	endPhase_ = EndPhase::kPlayerSlowMotion;
+	endPhaseTimer_ = 0.0f;
+	slowMotionFrameCounter_ = 0;
+	bossArmature_->SetAIEnabled(false);
+	titleLogo_->SetPosition({static_cast<float>(WinApp::kWindowWidth) * 0.5f, static_cast<float>(WinApp::kWindowHeight) * 0.5f});
+	titleLogo_->SetColor({1.0f, 1.0f, 1.0f, 0.0f});
+	blackOverlayAlpha_ = 0.0f;
+	whiteFlashAlpha_ = 0.0f;
+	resultContinueRequested_ = false;
+}
+
+void GameScene::StartBossDefeat() {
+	if (endType_ != EndType::kNone) { return; }
+	bossHealth_ = 0;
+	bossHealthRatio_ = 0.0f;
+	endType_ = EndType::kBossDefeat;
+	endPhase_ = EndPhase::kBossDefeatEffect;
+	endPhaseTimer_ = 0.0f;
+	bossArmature_->SetAIEnabled(false);
+	bossArmature_->SetVisible(true);
+	bossArmature_->SetDefeatBrightness(1.0f);
+	defeatCameraBase_ = cameraController_->GetCamera().translation_;
+	blackOverlayAlpha_ = 0.0f;
+	whiteFlashAlpha_ = 0.0f;
+	resultContinueRequested_ = false;
+	titleLogo_->SetPosition({static_cast<float>(WinApp::kWindowWidth) * 0.5f, static_cast<float>(WinApp::kWindowHeight) * 0.5f});
+	titleLogo_->SetColor({1.0f, 1.0f, 1.0f, 0.0f});
+	SpawnBossDefeatParticles();
+}
+
+void GameScene::BeginFadeToResult() {
+	endPhase_ = EndPhase::kFadeToBlack;
+	endPhaseTimer_ = 0.0f;
+	blackOverlayAlpha_ = 0.0f;
+	whiteFlashAlpha_ = 0.0f;
+}
+
+void GameScene::UpdateEndSequence() {
+	// Accept either result key as soon as the screen is fading to black. The
+	// request is remembered until the logo finishes fading in, so a key press
+	// during the transition is never lost.
+	if (endPhase_ == EndPhase::kFadeToBlack || endPhase_ == EndPhase::kLogoFadeIn || endPhase_ == EndPhase::kLogoWait) {
+		if (Input::GetInstance()->TriggerKey(DIK_SPACE) || Input::GetInstance()->TriggerKey(DIK_RETURN)) {
+			resultContinueRequested_ = true;
+		}
+	}
+
+	switch (endPhase_) {
+	case EndPhase::kPlayerSlowMotion:
+		endPhaseTimer_ += kFrameTime;
+		++slowMotionFrameCounter_;
+		if (slowMotionFrameCounter_ % 3u == 0u) {
+			bossArmature_->Update(player_->GetWorldTransform().translation_);
+		}
+		if (endPhaseTimer_ >= kPlayerSlowMotionDuration) { BeginFadeToResult(); }
+		break;
+	case EndPhase::kBossDefeatEffect: {
+		endPhaseTimer_ = (std::min)(endPhaseTimer_ + kFrameTime, kBossDefeatEffectDuration);
+		const float progress = endPhaseTimer_ / kBossDefeatEffectDuration;
+		const float easedProgress = SmoothStep(progress);
+		bossArmature_->SetDefeatBrightness(1.0f + 4.0f * easedProgress);
+		UpdateBossDefeatParticles();
+
+		effectRandomState_ = effectRandomState_ * 1664525u + 1013904223u;
+		const float randomX = static_cast<float>((effectRandomState_ >> 16u) & 0xFFFFu) / 32767.5f - 1.0f;
+		effectRandomState_ = effectRandomState_ * 1664525u + 1013904223u;
+		const float randomY = static_cast<float>((effectRandomState_ >> 16u) & 0xFFFFu) / 32767.5f - 1.0f;
+		const float shakeStrength = 0.08f + 0.16f * (1.0f - progress);
+		Camera& camera = cameraController_->GetCamera();
+		camera.translation_ = {
+		    defeatCameraBase_.x + randomX * shakeStrength,
+		    defeatCameraBase_.y + randomY * shakeStrength,
+		    defeatCameraBase_.z};
+		camera.UpdateMatrix();
+
+		const float flashDistance = std::abs(progress - 0.82f);
+		whiteFlashAlpha_ = flashDistance < 0.12f ? (1.0f - flashDistance / 0.12f) * 0.72f : 0.0f;
+		if (progress >= 0.88f) { bossArmature_->SetVisible(false); }
+		if (endPhaseTimer_ >= kBossDefeatEffectDuration) {
+			camera.translation_ = defeatCameraBase_;
+			camera.UpdateMatrix();
+			whiteFlashAlpha_ = 0.0f;
+			healthBarsVisible_ = false;
+			victoryDialogueSystem_->Start();
+			endPhase_ = EndPhase::kBossDialogue;
+			endPhaseTimer_ = 0.0f;
+		}
+		break;
+	}
+	case EndPhase::kBossDialogue:
+		victoryDialogueSystem_->Update();
+		if (victoryDialogueSystem_->IsFinished()) { BeginFadeToResult(); }
+		break;
+	case EndPhase::kFadeToBlack:
+		endPhaseTimer_ = (std::min)(endPhaseTimer_ + kFrameTime, kScreenFadeDuration);
+		blackOverlayAlpha_ = SmoothStep(endPhaseTimer_ / kScreenFadeDuration);
+		if (endPhaseTimer_ >= kScreenFadeDuration) {
+			endPhase_ = EndPhase::kLogoFadeIn;
+			endPhaseTimer_ = 0.0f;
+		}
+		break;
+	case EndPhase::kLogoFadeIn: {
+		endPhaseTimer_ = (std::min)(endPhaseTimer_ + kFrameTime, kResultLogoFadeInDuration);
+		const float alpha = SmoothStep(endPhaseTimer_ / kResultLogoFadeInDuration);
+		titleLogo_->SetColor({1.0f, 1.0f, 1.0f, alpha});
+		blackOverlayAlpha_ = 1.0f;
+		if (endPhaseTimer_ >= kResultLogoFadeInDuration) {
+			endPhase_ = EndPhase::kLogoWait;
+			endPhaseTimer_ = 0.0f;
+		}
+		break;
+	}
+	case EndPhase::kLogoWait: {
+		if (resultContinueRequested_) {
+			endPhase_ = EndPhase::kLogoFadeOut;
+			endPhaseTimer_ = 0.0f;
+			resultContinueRequested_ = false;
+		}
+		break;
+	}
+	case EndPhase::kLogoFadeOut: {
+		endPhaseTimer_ = (std::min)(endPhaseTimer_ + kFrameTime, kResultLogoFadeOutDuration);
+		const float alpha = 1.0f - SmoothStep(endPhaseTimer_ / kResultLogoFadeOutDuration);
+		titleLogo_->SetColor({1.0f, 1.0f, 1.0f, alpha});
+		if (endPhaseTimer_ >= kResultLogoFadeOutDuration) { restartToTitleRequested_ = true; }
+		break;
+	}
+	case EndPhase::kNone:
+		break;
+	}
+
+	blackOverlay_->SetColor({0.0f, 0.0f, 0.0f, blackOverlayAlpha_});
+	whiteFlashOverlay_->SetColor({1.0f, 1.0f, 1.0f, whiteFlashAlpha_});
+}
+
+void GameScene::SpawnBossDefeatParticles() {
+	const Vector3 bossPosition = bossArmature_->GetPosition();
+	for (size_t index = 0; index < defeatParticles_.size(); ++index) {
+		DefeatParticle& particle = defeatParticles_[index];
+		effectRandomState_ = effectRandomState_ * 1664525u + 1013904223u;
+		const float randomValue = static_cast<float>((effectRandomState_ >> 16u) & 0xFFFFu) / 65535.0f;
+		const float angle = static_cast<float>(index) / static_cast<float>(defeatParticles_.size()) * 2.0f * std::numbers::pi_v<float> + (randomValue - 0.5f) * 0.28f;
+		effectRandomState_ = effectRandomState_ * 1664525u + 1013904223u;
+		const float speedRandom = static_cast<float>((effectRandomState_ >> 16u) & 0xFFFFu) / 65535.0f;
+		const float speed = kBossDefeatParticleMinimumSpeed + speedRandom * kBossDefeatParticleAdditionalSpeed;
+		particle.velocity = {std::cos(angle) * speed, std::sin(angle) * speed + 0.8f, 0.0f};
+		particle.maxLife = kBossDefeatParticleMinimumLife + speedRandom * kBossDefeatParticleAdditionalLife;
+		particle.life = particle.maxLife;
+		particle.initialScale = kBossDefeatParticleMinimumScale + randomValue * kBossDefeatParticleAdditionalScale;
+		particle.active = true;
+		particle.transform.translation_ = {bossPosition.x, bossPosition.y + 4.0f, bossPosition.z};
+		particle.transform.scale_ = {particle.initialScale, particle.initialScale, particle.initialScale};
+		particle.transform.matWorld_ = Matrix4x4Calculation::MakeAffineMatrix(
+		    particle.transform.scale_, particle.transform.rotation_, particle.transform.translation_);
+		particle.transform.TransferMatrix();
+	}
+}
+
+void GameScene::UpdateBossDefeatParticles() {
+	for (DefeatParticle& particle : defeatParticles_) {
+		if (!particle.active) { continue; }
+		particle.life = (std::max)(0.0f, particle.life - kFrameTime);
+		if (particle.life <= 0.0f) {
+			particle.active = false;
+			continue;
+		}
+		particle.transform.translation_.x += particle.velocity.x * kFrameTime;
+		particle.transform.translation_.y += particle.velocity.y * kFrameTime;
+		particle.velocity.y -= kBossDefeatParticleGravity * kFrameTime;
+		const float scale = particle.initialScale * (particle.life / particle.maxLife);
+		particle.transform.scale_ = {scale, scale, scale};
+		particle.transform.matWorld_ = Matrix4x4Calculation::MakeAffineMatrix(
+		    particle.transform.scale_, particle.transform.rotation_, particle.transform.translation_);
+		particle.transform.TransferMatrix();
+	}
+}
+
+void GameScene::StartHealthBarEntrance() {
+	healthBarsVisible_ = true;
+	healthBarAppearTimer_ = 0.0f;
+}
+
+void GameScene::UpdateHealthBars() {
+	if (!healthBarsVisible_) { return; }
+
+	healthBarAppearTimer_ = (std::min)(healthBarAppearTimer_ + kFrameTime, kHealthBarAppearDuration);
+	const float t = healthBarAppearTimer_ / kHealthBarAppearDuration;
+	const float easedT = t * t * t * (t * (t * 6.0f - 15.0f) + 10.0f);
+	const float windowWidth = static_cast<float>(WinApp::kWindowWidth);
+	const float windowHeight = static_cast<float>(WinApp::kWindowHeight);
+
+	const float playerX = -360.0f + (36.0f + 360.0f) * easedT;
+	constexpr float playerY = 42.0f;
+	constexpr float playerFrameWidth = 350.0f;
+	constexpr float playerBarWidth = 336.0f;
+	playerHealthFrame_->SetPosition({playerX, playerY});
+	playerHealthFrame_->SetSize({playerFrameWidth, 22.0f});
+	playerHealthBackground_->SetPosition({playerX + 7.0f, playerY});
+	playerHealthBackground_->SetSize({playerBarWidth, 10.0f});
+	playerHealthFill_->SetPosition({playerX + 7.0f, playerY});
+	playerHealthFill_->SetSize({playerBarWidth * std::clamp(playerHealthRatio_, 0.0f, 1.0f), 10.0f});
+
+	const float bossY = windowHeight + 36.0f + ((windowHeight - 56.0f) - (windowHeight + 36.0f)) * easedT;
+	constexpr float bossFrameWidth = 1040.0f;
+	constexpr float bossBarWidth = 1022.0f;
+	bossHealthFrame_->SetPosition({windowWidth * 0.5f, bossY});
+	bossHealthFrame_->SetSize({bossFrameWidth, 24.0f});
+	bossHealthBackground_->SetPosition({windowWidth * 0.5f, bossY});
+	bossHealthBackground_->SetSize({bossBarWidth, 10.0f});
+	bossHealthFill_->SetPosition({windowWidth * 0.5f - bossBarWidth * 0.5f, bossY});
+	bossHealthFill_->SetSize({bossBarWidth * std::clamp(bossHealthRatio_, 0.0f, 1.0f), 10.0f});
+
+	playerHealthFrame_->SetColor({0.03f, 0.02f, 0.02f, 0.96f * easedT});
+	playerHealthBackground_->SetColor({0.025f, 0.09f, 0.035f, 0.94f * easedT});
+	playerHealthFill_->SetColor({0.08f, 0.72f, 0.16f, easedT});
+	bossHealthFrame_->SetColor({0.025f, 0.015f, 0.015f, 0.96f * easedT});
+	bossHealthBackground_->SetColor({0.10f, 0.025f, 0.025f, 0.94f * easedT});
+	bossHealthFill_->SetColor({0.72f, 0.02f, 0.02f, easedT});
+}
+
+void GameScene::DrawHealthBars() const {
+	if (!healthBarsVisible_) { return; }
+
+	Sprite::PreDraw();
+	playerHealthFrame_->Draw();
+	playerHealthBackground_->Draw();
+	playerHealthFill_->Draw();
+	bossHealthFrame_->Draw();
+	bossHealthBackground_->Draw();
+	bossHealthFill_->Draw();
+	Sprite::PostDraw();
+}
+
+void GameScene::DrawBossRangeVisual() {
+	if (!showBossRangeVisual_ || !bossAIStarted_ || endType_ != EndType::kNone) { return; }
+	const Camera& camera = cameraController_->GetCamera();
+	const Vector3 bossPosition = bossArmature_->GetPosition();
+	const float depth = (std::max)(bossPosition.z - camera.translation_.z, 0.1f);
+	const float halfViewWidth = std::tan(camera.fovAngleY * 0.5f) * depth * camera.aspectRatio;
+	const float windowWidth = static_cast<float>(WinApp::kWindowWidth);
+	const float windowHeight = static_cast<float>(WinApp::kWindowHeight);
+	auto worldToScreenX = [&](float worldX) {
+		const float normalized = (worldX - (camera.translation_.x - halfViewWidth)) / (halfViewWidth * 2.0f);
+		return std::clamp(normalized * windowWidth, 0.0f, windowWidth);
+	};
+	auto setBand = [&](Sprite* sprite, float left, float right, const Vector4& color) {
+		const float width = (std::max)(0.0f, right - left);
+		sprite->SetPosition({left, 0.0f});
+		sprite->SetSize({width, windowHeight});
+		sprite->SetColor(color);
+	};
+
+	const float nearLeft = worldToScreenX(bossPosition.x - bossArmature_->GetCloseDistance());
+	const float nearRight = worldToScreenX(bossPosition.x + bossArmature_->GetCloseDistance());
+	const float midLeft = worldToScreenX(bossPosition.x - bossArmature_->GetMidDistance());
+	const float midRight = worldToScreenX(bossPosition.x + bossArmature_->GetMidDistance());
+	setBand(bossRangeSprites_[0], 0.0f, midLeft, {0.20f, 0.80f, 0.30f, 0.10f});
+	setBand(bossRangeSprites_[1], midRight, windowWidth, {0.20f, 0.80f, 0.30f, 0.10f});
+	setBand(bossRangeSprites_[2], midLeft, nearLeft, {1.0f, 0.85f, 0.20f, 0.12f});
+	setBand(bossRangeSprites_[3], nearRight, midRight, {1.0f, 0.85f, 0.20f, 0.12f});
+	setBand(bossRangeSprites_[4], nearLeft, nearRight, {1.0f, 0.20f, 0.20f, 0.14f});
+	Sprite::PreDraw();
+	for (Sprite* sprite : bossRangeSprites_) { sprite->Draw(); }
+	Sprite::PostDraw();
+}
+
+void GameScene::DrawCollisionDebug(const Camera& camera) const {
+	if (!showCollisionDebug_ || !bossAIStarted_ || endType_ != EndType::kNone) { return; }
+	PrimitiveDrawer* drawer = PrimitiveDrawer::GetInstance();
+	drawer->SetCamera(&camera);
+	auto drawBox = [&](const Vector3& minimum, const Vector3& maximum, const Vector4& color) {
+		const float z = 0.10f;
+		const Vector3 bottomLeft = {minimum.x, minimum.y, z};
+		const Vector3 bottomRight = {maximum.x, minimum.y, z};
+		const Vector3 topLeft = {minimum.x, maximum.y, z};
+		const Vector3 topRight = {maximum.x, maximum.y, z};
+		drawer->DrawLine3d(bottomLeft, bottomRight, color);
+		drawer->DrawLine3d(bottomRight, topRight, color);
+		drawer->DrawLine3d(topRight, topLeft, color);
+		drawer->DrawLine3d(topLeft, bottomLeft, color);
+	};
+	const Player::AttackHitbox playerBody = player_->GetBodyHitbox();
+	const BossArmature::CollisionBox bossBody = bossArmature_->GetBodyHitbox();
+	const BossArmature::CollisionBox scythe = bossArmature_->GetScytheHitbox();
+	drawBox(playerBody.min, playerBody.max, {0.10f, 1.0f, 0.20f, 1.0f});
+	drawBox(bossBody.min, bossBody.max, {1.0f, 0.10f, 0.10f, 1.0f});
+	drawBox(scythe.min, scythe.max, bossArmature_->IsScytheAttackActive() ? Vector4{1.0f, 0.15f, 0.05f, 1.0f} : Vector4{1.0f, 0.85f, 0.10f, 1.0f});
+	if (player_->IsAttackActive()) {
+		const Player::AttackHitbox attack = player_->GetAttackHitbox();
+		drawBox(attack.min, attack.max, {0.20f, 0.65f, 1.0f, 1.0f});
+	}
+}
+
+void GameScene::DrawBossDefeatParticles(const Camera& camera) const {
+	if (endPhase_ != EndPhase::kBossDefeatEffect || defeatParticleModel_ == nullptr) { return; }
+	Model::PreDraw(Model::CullingMode::kNone, Model::BlendMode::kAdd, Model::DepthTestMode::kOff);
+	for (const DefeatParticle& particle : defeatParticles_) {
+		if (particle.active) { defeatParticleModel_->Draw(particle.transform, camera, &defeatParticleColor_); }
+	}
+	Model::PostDraw();
+}
+
+void GameScene::DrawEndOverlay() const {
+	if (endType_ == EndType::kNone) { return; }
+	Sprite::PreDraw();
+	if (whiteFlashAlpha_ > 0.0f) { whiteFlashOverlay_->Draw(); }
+	if (blackOverlayAlpha_ > 0.0f) { blackOverlay_->Draw(); }
+	if (endPhase_ == EndPhase::kLogoFadeIn || endPhase_ == EndPhase::kLogoWait || endPhase_ == EndPhase::kLogoFadeOut) {
+		titleLogo_->Draw();
+	}
+	Sprite::PostDraw();
+}
+
+#ifdef USE_IMGUI
+void GameScene::DrawCombatImGui() {
+	ImGui::SetNextWindowPos(ImVec2(930.0f, 20.0f), ImGuiCond_Always);
+	ImGui::SetNextWindowSize(ImVec2(330.0f, 170.0f), ImGuiCond_Always);
+	ImGui::Begin("Combat Debug");
+	ImGui::Checkbox("Show boss AI ranges", &showBossRangeVisual_);
+	ImGui::Checkbox("Show collision boxes", &showCollisionDebug_);
+	ImGui::Text("Player health: %d / %d", playerHealth_, kPlayerMaximumHealth);
+	ImGui::Text("Boss health: %d / %d", bossHealth_, kBossMaximumHealth);
+	ImGui::Text("Damage: Player %d | Body %d | Scythe %d", kPlayerAttackDamage, kBossBodyDamage, kScytheDamage);
+	if (ImGui::Button("Instant Player Lose")) { StartPlayerDefeat(); }
+	ImGui::SameLine();
+	if (ImGui::Button("Instant Boss Lose")) { StartBossDefeat(); }
+	ImGui::End();
+}
+#endif
+
+void GameScene::UpdateTitle() {
+	if (flowState_ == FlowState::kTitle && Input::GetInstance()->TriggerKey(DIK_SPACE)) {
+		flowState_ = FlowState::kTitleFadeOut;
+		titleFadeTimer_ = 0.0f;
+	}
+
+	if (flowState_ == FlowState::kTitleFadeOut) {
+		titleFadeTimer_ = (std::min)(titleFadeTimer_ + kFrameTime, kTitleFadeDuration);
+		float t = titleFadeTimer_ / kTitleFadeDuration;
+		t = t * t * (3.0f - 2.0f * t);
+		if (titleLogo_ != nullptr) { titleLogo_->SetColor({1.0f, 1.0f, 1.0f, 1.0f - t}); }
+		if (titleFadeTimer_ >= kTitleFadeDuration) { flowState_ = FlowState::kPlay; }
+	}
+
+	mapChipField_->Update();
+	skydome_->Update(cameraController_->GetCamera());
+}
+
+void GameScene::StartBossEncounter() {
+	bossEncounterStarted_ = true;
+	cameraController_->LockToPosition(
+	    {kBossArenaCameraX, kBossArenaCameraY, -15.0f}, kBossCameraEaseDuration);
+	player_->SetLeftBoundary(kBossArenaPlayerMinX);
+	bossArmature_->SetHorizontalBounds(kBossArenaBossMinX, kBossArenaBossMaxX);
+}
+
+void GameScene::Draw() {
+	const Camera& camera = cameraController_->GetCamera();
+	Model::PreDraw(Model::CullingMode::kNone);
+	skydome_->Draw(camera);
+	Model::PostDraw();
+	Model::PreDraw(Model::CullingMode::kNone);
+	mapChipField_->Draw(camera);
+	player_->Draw(camera);
+	if (flowState_ == FlowState::kPlay) { bossArmature_->Draw(camera); }
+	Model::PostDraw();
+	DrawBossDefeatParticles(camera);
+	if (flowState_ == FlowState::kPlay) { DrawBossRangeVisual(); }
+	if (flowState_ == FlowState::kPlay) { bossArmature_->DrawDebug(camera); }
+	if (flowState_ == FlowState::kPlay) { DrawCollisionDebug(camera); }
+	if (flowState_ == FlowState::kPlay && dialogueSystem_ != nullptr) { dialogueSystem_->Draw(); }
+	if (flowState_ == FlowState::kPlay && victoryDialogueSystem_ != nullptr) { victoryDialogueSystem_->Draw(); }
+	if (flowState_ != FlowState::kPlay && titleLogo_ != nullptr) {
+		Sprite::PreDraw();
+		titleLogo_->Draw();
+		Sprite::PostDraw();
+	}
+	if (flowState_ == FlowState::kPlay) { DrawHealthBars(); }
+	DrawEndOverlay();
+}
+
+GameScene::~GameScene() {
+	for (Sprite*& rangeSprite : bossRangeSprites_) {
+		delete rangeSprite;
+		rangeSprite = nullptr;
+	}
+	delete whiteFlashOverlay_;
+	delete blackOverlay_;
+	delete bossHealthFill_;
+	delete bossHealthBackground_;
+	delete bossHealthFrame_;
+	delete playerHealthFill_;
+	delete playerHealthBackground_;
+	delete playerHealthFrame_;
+	delete titleLogo_;
+	delete defeatParticleModel_;
+	delete victoryDialogueSystem_;
+	delete dialogueSystem_;
+	delete bossArmature_;
+	delete skydome_;
+	delete cameraController_;
+	delete player_;
+	delete mapChipField_;
+}

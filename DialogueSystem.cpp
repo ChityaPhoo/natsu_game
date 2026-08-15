@@ -3,7 +3,12 @@
 
 using namespace KamataEngine;
 
-void DialogueSystem::Initialize(uint32_t pageCount, const std::vector<std::string>& spriteFiles, float screenHeightRatio) {
+void DialogueSystem::Initialize(
+    uint32_t pageCount,
+    const std::vector<std::string>& spriteFiles,
+    float screenHeightRatio,
+    Vector2 textureCropBase,
+    Vector2 textureCropSize) {
 	for (Sprite* sprite : pageSprites_) { delete sprite; }
 	pageSprites_.clear();
 	pageBaseColors_.clear();
@@ -19,6 +24,9 @@ void DialogueSystem::Initialize(uint32_t pageCount, const std::vector<std::strin
 		const uint32_t textureHandle = TextureManager::Load(hasCustomSprite ? spriteFiles[spriteIndex] : "white1x1.png");
 		const Vector4 baseColor = hasCustomSprite ? Vector4{1.0f, 1.0f, 1.0f, 1.0f} : Vector4{0.035f, 0.045f, 0.060f, 0.94f};
 		Sprite* pageSprite = Sprite::Create(textureHandle, pagePosition, {baseColor.x, baseColor.y, baseColor.z, 0.0f});
+		if (hasCustomSprite && textureCropSize.x > 0.0f && textureCropSize.y > 0.0f) {
+			pageSprite->SetTextureRect(textureCropBase, textureCropSize);
+		}
 		pageSprite->SetSize(pageSize);
 		pageSprites_.push_back(pageSprite);
 		pageBaseColors_.push_back(baseColor);
@@ -26,6 +34,7 @@ void DialogueSystem::Initialize(uint32_t pageCount, const std::vector<std::strin
 
 	currentPage_ = 0;
 	phaseTimer_ = 0.0f;
+	currentVisibility_ = 0.0f;
 	phase_ = Phase::kIdle;
 }
 
@@ -87,11 +96,22 @@ void DialogueSystem::Update() {
 void DialogueSystem::ApplyCurrentPageVisual(float visibility) {
 	if (static_cast<size_t>(currentPage_) >= pageSprites_.size()) { return; }
 	visibility = std::clamp(visibility, 0.0f, 1.0f);
+	currentVisibility_ = visibility;
 	const float windowHeight = static_cast<float>(WinApp::kWindowHeight);
 	const float pageHeight = windowHeight * screenHeightRatio_;
 	const Vector4& baseColor = pageBaseColors_[currentPage_];
 	pageSprites_[currentPage_]->SetPosition({0.0f, windowHeight - pageHeight + kSlideDistance * (1.0f - visibility)});
-	pageSprites_[currentPage_]->SetColor({baseColor.x, baseColor.y, baseColor.z, baseColor.w * visibility});
+	pageSprites_[currentPage_]->SetColor({baseColor.x, baseColor.y, baseColor.z, baseColor.w * opacity_ * visibility});
+}
+
+void DialogueSystem::SetOpacity(float opacity) {
+	opacity_ = std::clamp(opacity, 0.0f, 1.0f);
+	if (static_cast<size_t>(currentPage_) < pageSprites_.size()) { ApplyCurrentPageVisual(currentVisibility_); }
+}
+
+void DialogueSystem::SetBaseColor(const Vector4& color) {
+	for (Vector4& baseColor : pageBaseColors_) { baseColor = color; }
+	if (static_cast<size_t>(currentPage_) < pageSprites_.size()) { ApplyCurrentPageVisual(currentVisibility_); }
 }
 
 float DialogueSystem::SmoothStep(float t) {

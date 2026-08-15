@@ -8,6 +8,7 @@ using namespace KamataEngine;
 
 void Player::Initialize() {
 	worldTransform_.Initialize();
+	visualTransform_.Initialize();
 	attackEffectTransform_.Initialize();
 	model_ = Model::CreateFromOBJ("player", true);
 	attackEffectModel_ = Model::CreateFromOBJ("hit_effect", true);
@@ -20,11 +21,18 @@ void Player::Initialize() {
 	attackPhase_ = AttackPhase::kCharge;
 	actionTimer_ = 0.0f;
 	dashCooldownTimer_ = 0.0f;
+	idleAnimationTimer_ = 0.0f;
 	isAttackEffectVisible_ = false;
 	currentDirection_ = LRDirection::kRight;
 	worldTransform_.rotation_.y = std::numbers::pi_v<float> / 2.0f;
 	attackEffectTransform_.scale_ = {kAttackEffectScale, kAttackEffectScale, kAttackEffectScale};
 	UpdateWorldMatrix();
+}
+
+void Player::UpdateIdleAnimation() {
+	idleAnimationTimer_ += kFrameTime;
+	const float cycleDuration = (std::max)(kIdleCycleDuration, kFrameTime);
+	if (idleAnimationTimer_ >= cycleDuration) { idleAnimationTimer_ = std::fmod(idleAnimationTimer_, cycleDuration); }
 }
 
 void Player::SetPosition(const Vector3& position) {
@@ -312,12 +320,26 @@ float Player::EaseOut(float start, float end, float t) {
 
 void Player::Draw(const Camera& camera) {
 	if (model_ == nullptr) { return; }
-	const float centerY = worldTransform_.translation_.y;
-	worldTransform_.translation_.y += kVisualOffsetY;
-	UpdateWorldMatrix();
-	model_->Draw(worldTransform_, camera);
-	worldTransform_.translation_.y = centerY;
-	UpdateWorldMatrix();
+	visualTransform_.translation_ = worldTransform_.translation_;
+	visualTransform_.rotation_ = worldTransform_.rotation_;
+	visualTransform_.scale_ = worldTransform_.scale_;
+	const bool isIdle =
+	    actionState_ == ActionState::kNormal &&
+	    std::abs(velocity_.x) <= kIdleMaximumMovementSpeed &&
+	    std::abs(velocity_.y) <= kIdleMaximumMovementSpeed;
+	if (isIdle) {
+		const float cycleDuration = (std::max)(kIdleCycleDuration, kFrameTime);
+		const float breath = std::sin(idleAnimationTimer_ / cycleDuration * 2.0f * std::numbers::pi_v<float>);
+		visualTransform_.translation_.y += breath * kIdleMoveAmount;
+		visualTransform_.scale_.x *= 1.0f - breath * kIdleHorizontalScaleAmount;
+		visualTransform_.scale_.y *= 1.0f + breath * kIdleScaleAmount;
+		visualTransform_.scale_.z *= 1.0f - breath * kIdleHorizontalScaleAmount;
+	}
+	visualTransform_.translation_.y += kVisualOffsetY;
+	visualTransform_.matWorld_ = Matrix4x4Calculation::MakeAffineMatrix(
+	    visualTransform_.scale_, visualTransform_.rotation_, visualTransform_.translation_);
+	visualTransform_.TransferMatrix();
+	model_->Draw(visualTransform_, camera);
 
 	if (isAttackEffectVisible_ && attackEffectModel_ != nullptr) {
 		attackEffectModel_->Draw(attackEffectTransform_, camera);

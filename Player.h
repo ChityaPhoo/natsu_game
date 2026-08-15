@@ -17,6 +17,7 @@ public:
 	void SetMapChipField(MapChipField* mapChipField) { mapChipField_ = mapChipField; }
 	void SetLeftBoundary(float boundary) { leftBoundary_ = boundary; hasLeftBoundary_ = true; }
 	void ClearLeftBoundary() { hasLeftBoundary_ = false; }
+	void UpdateIdleAnimation();
 	void Update();
 	void Draw(const KamataEngine::Camera& camera);
 	const KamataEngine::WorldTransform& GetWorldTransform() const { return worldTransform_; }
@@ -56,9 +57,18 @@ private:
 	static inline const float kCollisionHalfHeight = 0.40f;
 	static inline const float kCollisionEpsilon = 0.001f;
 	static inline const float kTurnDuration = 0.15f;
-	static inline const float kVisualOffsetY = -1.20f;
+	// The model is already authored around the gameplay origin. A negative
+	// render offset pushes it inside the two-row floor and hides it by depth.
+	static inline const float kVisualOffsetY = 0.0f;
+	// Player breathing/idle animation tuning. This only affects drawing, so the
+	// collision box and movement position remain unchanged.
+	static inline const float kIdleMoveAmount = 0.18f;
+	static inline const float kIdleScaleAmount = 0.14f;
+	static inline const float kIdleHorizontalScaleAmount = 0.075f;
+	static inline const float kIdleCycleDuration = 1.65f;
+	static inline const float kIdleMaximumMovementSpeed = 0.05f;
 	static inline const float kMapMinCenterX = 0.45f;
-	static inline const float kMapMaxCenterX = 59.55f;
+	static inline const float kMapMaxCenterX = 99.55f;
 	static inline const float kFrameTime = 1.0f / 60.0f;
 	static inline const float kDashChargeTime = 0.10f;
 	static inline const float kDashBurstTime = 0.12f;
@@ -78,6 +88,9 @@ private:
 	static inline const float kAttackCollisionHalfHeight = 0.45f;
 
 	KamataEngine::WorldTransform worldTransform_;
+	// Uses a separate constant buffer from the gameplay/collision transform so
+	// restoring the logical pose cannot erase the breathing pose before drawing.
+	KamataEngine::WorldTransform visualTransform_;
 	KamataEngine::WorldTransform attackEffectTransform_;
 	KamataEngine::Model* model_ = nullptr;
 	KamataEngine::Model* attackEffectModel_ = nullptr;
@@ -95,6 +108,7 @@ private:
 	float turnTimer_ = 0.0f;
 	float actionTimer_ = 0.0f;
 	float dashCooldownTimer_ = 0.0f;
+	float idleAnimationTimer_ = 0.0f;
 	float dashDirection_ = 1.0f;
 	float leftBoundary_ = 0.0f;
 	bool hasLeftBoundary_ = false;

@@ -4,6 +4,7 @@
 #include <cctype>
 #include <cmath>
 #include <fstream>
+#include <numbers>
 #include <sstream>
 
 using namespace KamataEngine;
@@ -82,7 +83,13 @@ void MapChipField::BuildWorld() {
 		worldTransforms_[y].resize(columns, nullptr);
 		for (uint32_t x = 0; x < columns; ++x) {
 			if (GetMapChipTypeFromIndex(x, y) != MapChipType::kBlock) { continue; }
-			auto* transform = new WorldTransform(); transform->Initialize(); transform->translation_ = GetMapChipPositionFromIndex(x, y); worldTransforms_[y][x] = transform;
+			auto* transform = new WorldTransform();
+			transform->Initialize();
+			transform->translation_ = GetMapChipPositionFromIndex(x, y);
+			// The replacement block art was authored vertically. Rotating the cube
+			// rotates its UV presentation without changing the PNG or collision box.
+			transform->rotation_.z = std::numbers::pi_v<float> * 0.5f;
+			worldTransforms_[y][x] = transform;
 		}
 	}
 }

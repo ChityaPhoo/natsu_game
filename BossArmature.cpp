@@ -44,6 +44,8 @@ void BossArmature::Initialize() {
 	defeatColor_.Initialize();
 	defeatColor_.SetColor({1.0f, 1.0f, 1.0f, 1.0f});
 	isVisible_ = true;
+	phaseTransitionActive_ = false;
+	idleAnimationTimer_ = 0.0f;
 	playerTargetPosition_ = {2.5f, 1.401f, 0.0f};
 	actionTargetPosition_ = playerTargetPosition_;
 	FacePlayer();
@@ -82,6 +84,7 @@ void BossArmature::Update(const Vector3& playerPosition) {
 	playerDistance_ = std::abs(playerTargetPosition_.x - defaultTranslations_[kRoot].x);
 	UpdateAI();
 	UpdateAnimation();
+	UpdateIdleAnimation();
 	for (uint32_t index = 0; index < kJointCount; ++index) {
 		Joint& joint = joints_[index];
 		joint.localMatrix = Matrix4x4Calculation::MakeAffineMatrix(joint.scale, joint.rotation, joint.translation);
@@ -164,6 +167,11 @@ void BossArmature::DrawImGui() {
 	ImGui::Checkbox("Show debug armature", &showDebugArmature_);
 	ImGui::Checkbox("Show debug scythe", &showDebugScythe_);
 	ImGui::DragFloat("Joint sphere radius", &jointRadius_, 0.005f, 0.02f, 0.50f);
+	if (ImGui::CollapsingHeader("Idle Animation", ImGuiTreeNodeFlags_DefaultOpen)) {
+		ImGui::DragFloat("Idle vertical move", &idleMoveAmount_, 0.005f, 0.0f, 0.50f);
+		ImGui::DragFloat("Idle breathing scale", &idleScaleAmount_, 0.001f, 0.0f, 0.15f);
+		ImGui::DragFloat("Idle cycle duration", &idleCycleDuration_, 0.05f, 0.20f, 8.0f, "%.2f sec");
+	}
 	if (ImGui::CollapsingHeader("Damage Hitboxes", ImGuiTreeNodeFlags_DefaultOpen)) {
 		ImGui::TextUnformatted("Enable collision boxes in Combat Debug to preview these.");
 		ImGui::DragFloat("Body half width", &bodyHitboxHalfWidth_, 0.02f, 0.10f, 8.0f);
@@ -319,6 +327,76 @@ void BossArmature::ResetPose() {
 		joints_[index].rotation = defaultRotations_[index];
 		joints_[index].scale = {1.0f, 1.0f, 1.0f};
 	}
+}
+
+void BossArmature::ClearIdlePose() {
+	joints_[kRoot].translation.y = defaultTranslations_[kRoot].y;
+	joints_[kRoot].translation.z = defaultTranslations_[kRoot].z;
+	joints_[kRoot].scale = {1.0f, 1.0f, 1.0f};
+}
+
+void BossArmature::UpdateIdleAnimation() {
+	idleAnimationTimer_ += kFrameTime;
+	const float cycleDuration = (std::max)(idleCycleDuration_, kFrameTime);
+	if (idleAnimationTimer_ >= cycleDuration) { idleAnimationTimer_ = std::fmod(idleAnimationTimer_, cycleDuration); }
+	if (phaseTransitionActive_ || activeAnimation_ != AnimationType::kNone) { return; }
+
+	const float breath = std::sin(idleAnimationTimer_ / cycleDuration * 2.0f * std::numbers::pi_v<float>);
+	joints_[kRoot].translation.y = defaultTranslations_[kRoot].y + breath * idleMoveAmount_;
+	joints_[kRoot].scale = {
+	    1.0f - breath * idleScaleAmount_ * 0.45f,
+	    1.0f + breath * idleScaleAmount_,
+	    1.0f - breath * idleScaleAmount_ * 0.45f};
+}
+
+void BossArmature::BeginPhaseTransition() {
+	if (activeAnimation_ != AnimationType::kNone) { StopAnimation(); }
+	ClearIdlePose();
+	phaseTransitionActive_ = true;
+}
+
+void BossArmature::SetPhaseTransitionProgress(float progress) {
+	if (!phaseTransitionActive_) { return; }
+	progress = std::clamp(progress, 0.0f, 1.0f);
+
+	float horizontalScale = 1.0f;
+	float verticalScale = 1.0f;
+	float verticalOffset = 0.0f;
+	float armRaise = 0.0f;
+	if (progress < 0.32f) {
+		const float t = SmoothStep(progress / 0.32f);
+		horizontalScale = std::lerp(1.0f, 1.12f, t);
+		verticalScale = std::lerp(1.0f, 0.82f, t);
+		verticalOffset = std::lerp(0.0f, -0.28f, t);
+		armRaise = std::lerp(0.0f, 0.10f, t);
+	} else if (progress < 0.72f) {
+		const float t = SmoothStep((progress - 0.32f) / 0.40f);
+		horizontalScale = std::lerp(1.12f, 0.90f, t);
+		verticalScale = std::lerp(0.82f, 1.18f, t);
+		verticalOffset = std::lerp(-0.28f, 0.18f, t);
+		armRaise = std::lerp(0.10f, 0.50f, t);
+	} else {
+		const float t = SmoothStep((progress - 0.72f) / 0.28f);
+		horizontalScale = std::lerp(0.90f, 1.0f, t);
+		verticalScale = std::lerp(1.18f, 1.0f, t);
+		verticalOffset = std::lerp(0.18f, 0.0f, t);
+		armRaise = std::lerp(0.50f, 0.0f, t);
+	}
+
+	joints_[kRoot].translation.y = defaultTranslations_[kRoot].y + verticalOffset;
+	joints_[kRoot].scale = {horizontalScale, verticalScale, horizontalScale};
+	joints_[kLeftShoulder].rotation.z = defaultRotations_[kLeftShoulder].z + armRaise;
+	joints_[kRightShoulder].rotation.z = defaultRotations_[kRightShoulder].z - armRaise;
+	const float brightness = 1.0f + std::sin(progress * std::numbers::pi_v<float>) * 0.75f;
+	defeatColor_.SetColor({brightness, brightness, brightness, 1.0f});
+}
+
+void BossArmature::EndPhaseTransition() {
+	ClearIdlePose();
+	joints_[kLeftShoulder].rotation.z = defaultRotations_[kLeftShoulder].z;
+	joints_[kRightShoulder].rotation.z = defaultRotations_[kRightShoulder].z;
+	defeatColor_.SetColor({1.0f, 1.0f, 1.0f, 1.0f});
+	phaseTransitionActive_ = false;
 }
 
 void BossArmature::SetControlMode(ControlMode mode) {
@@ -801,6 +879,7 @@ void BossArmature::InitializeVerticalHookClip() {
 }
 
 void BossArmature::StartAnimation(AnimationType animation) {
+	ClearIdlePose();
 	if (activeAnimation_ != AnimationType::kNone) {
 		for (uint32_t index = 0; index < kJointCount; ++index) {
 			joints_[index].translation = animationBaseTranslations_[index];

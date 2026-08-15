@@ -8,10 +8,17 @@ class DialogueSystem {
 public:
 	~DialogueSystem();
 
-	void Initialize(uint32_t pageCount, const std::vector<std::string>& spriteFiles = {}, float screenHeightRatio = 0.25f);
+	void Initialize(
+	    uint32_t pageCount,
+	    const std::vector<std::string>& spriteFiles = {},
+	    float screenHeightRatio = 0.25f,
+	    KamataEngine::Vector2 textureCropBase = {},
+	    KamataEngine::Vector2 textureCropSize = {});
 	void Start();
 	void Update();
 	void Draw() const;
+	void SetOpacity(float opacity);
+	void SetBaseColor(const KamataEngine::Vector4& color);
 	bool IsActive() const;
 	bool IsFinished() const { return phase_ == Phase::kFinished; }
 
@@ -32,4 +39,6 @@ private:
 	uint32_t currentPage_ = 0;
 	float phaseTimer_ = 0.0f;
 	float screenHeightRatio_ = 0.25f;
+	float opacity_ = 1.0f;
+	float currentVisibility_ = 0.0f;
 };

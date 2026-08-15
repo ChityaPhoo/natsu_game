@@ -28,7 +28,7 @@ void GameScene::Initialize() {
 	// outside space nor empty space below the floor can enter the view.
 	cameraController_->SetMovableArea({
 	    kCameraViewHalfWidth,
-	    60.0f - kCameraViewHalfWidth,
+	    kMapWidth - kCameraViewHalfWidth,
 	    kCameraViewHalfHeight,
 	    20.0f - kCameraViewHalfHeight});
 	cameraController_->ResetCameraPosition();
@@ -41,10 +41,17 @@ void GameScene::Initialize() {
 	dialogueSystem_ = new DialogueSystem();
 	dialogueSystem_->Initialize(
 	    kBossDialoguePageCount,
-	    {
-	        // Add each complete dialogue-box sprite here later, in page order.
-	        // Example: "dialogue/boss_01.png",
-	    });
+	    std::vector<std::string>(kBossDialoguePageCount, kDialogueBoxSpriteFile),
+	    0.25f,
+	    {kDialogueBoxCropX, kDialogueBoxCropY},
+	    {kDialogueBoxCropWidth, kDialogueBoxCropHeight});
+	phaseDialogueSystem_ = new DialogueSystem();
+	phaseDialogueSystem_->Initialize(
+	    kBossPhaseDialoguePageCount,
+	    std::vector<std::string>(kBossPhaseDialoguePageCount, kDialogueBoxSpriteFile),
+	    0.25f,
+	    {kDialogueBoxCropX, kDialogueBoxCropY},
+	    {kDialogueBoxCropWidth, kDialogueBoxCropHeight});
 	victoryDialogueSystem_ = new DialogueSystem();
 	victoryDialogueSystem_->Initialize(
 	    1,
@@ -53,6 +60,12 @@ void GameScene::Initialize() {
 	        // Example: "dialogue/boss_defeated.png",
 	    },
 	    1.0f);
+	// The post-boss dialogue is a separate full-screen black page. Its opacity
+	// remains independently adjustable from the regular dialogue box.
+	victoryDialogueSystem_->SetBaseColor({0.0f, 0.0f, 0.0f, 1.0f});
+	dialogueSystem_->SetOpacity(dialogueBoxOpacity_);
+	phaseDialogueSystem_->SetOpacity(dialogueBoxOpacity_);
+	victoryDialogueSystem_->SetOpacity(defeatedDialogueOpacity_);
 	defeatParticleModel_ = Model::CreateSphere(6, 6);
 	defeatParticleColor_.Initialize();
 	defeatParticleColor_.SetColor({1.0f, 0.24f, 0.06f, 0.90f});
@@ -60,14 +73,49 @@ void GameScene::Initialize() {
 		particle.transform.Initialize();
 		particle.active = false;
 	}
-	const uint32_t titleLogoTexture = TextureManager::Load("game1.png");
+	const bool hasIntroSprite = kIntroSpriteFile[0] != '\0';
+	const uint32_t introSpriteTexture = TextureManager::Load(hasIntroSprite ? kIntroSpriteFile : "white1x1.png");
+	introSpriteBaseColor_ = {1.0f, 1.0f, 1.0f, 1.0f};
+	introSprite_ = Sprite::Create(introSpriteTexture, {0.0f, 0.0f}, {introSpriteBaseColor_.x, introSpriteBaseColor_.y, introSpriteBaseColor_.z, 0.0f});
+	introSprite_->SetSize({static_cast<float>(WinApp::kWindowWidth), static_cast<float>(WinApp::kWindowHeight)});
+
+	const uint32_t titleLogoTexture = TextureManager::Load("titleFont/titlelogo.png");
 	titleLogo_ = Sprite::Create(
 	    titleLogoTexture,
-	    {static_cast<float>(WinApp::kWindowWidth) * 0.5f, 165.0f},
-	    {1.0f, 1.0f, 1.0f, 1.0f},
+	    {static_cast<float>(WinApp::kWindowWidth) * 0.5f, kTitleLogoBaseY},
+	    {1.0f, 1.0f, 1.0f, 0.0f},
 	    {0.5f, 0.5f});
-	titleLogo_->SetSize({500.0f, 116.0f});
+	// Preserve the 252x102 source aspect ratio instead of stretching the logo.
+	titleLogo_->SetSize({500.0f, 202.0f});
+	const uint32_t titlePromptTexture = TextureManager::Load(kTitlePromptSpriteFile);
+	titlePromptSprite_ = Sprite::Create(
+	    titlePromptTexture,
+	    {static_cast<float>(WinApp::kWindowWidth) * 0.5f, kTitlePromptBaseY},
+	    {1.0f, 1.0f, 1.0f, 0.0f},
+	    {0.5f, 0.5f});
+	// titleui.png is a full-width 1280x128 strip authored for the bottom of the
+	// screen, so keep its native layout and transparency.
+	titlePromptSprite_->SetSize({kTitlePromptWidth, kTitlePromptHeight});
+	const uint32_t backgroundTexture = TextureManager::Load(kBackgroundSpriteFile);
+	for (Sprite*& backgroundSprite : backgroundSprites_) {
+		backgroundSprite = Sprite::Create(backgroundTexture, {0.0f, 0.0f});
+		backgroundSprite->SetSize({kBackgroundSpriteWidth, kBackgroundSpriteHeight});
+	}
+	const uint32_t moonTexture = TextureManager::Load(kMoonSpriteFile);
+	moonSprite_ = Sprite::Create(
+	    moonTexture, {kMoonPositionX, kMoonPositionY}, {1.0f, 1.0f, 1.0f, 1.0f}, {0.5f, 0.5f});
+	moonSprite_->SetSize({kMoonWidth, kMoonHeight});
+	const uint32_t gameplayUiOneTexture = TextureManager::Load(kGameplayUiOneSpriteFile);
+	gameplayUiOneSprite_ = Sprite::Create(
+	    gameplayUiOneTexture, {0.0f, 0.0f}, {1.0f, 1.0f, 1.0f, 0.0f}, {0.5f, 0.5f});
+	gameplayUiOneSprite_->SetSize({kGameplayUiWidth, kGameplayUiHeight});
+	const uint32_t gameplayUiTwoTexture = TextureManager::Load(kGameplayUiTwoSpriteFile);
+	gameplayUiTwoSprite_ = Sprite::Create(
+	    gameplayUiTwoTexture, {0.0f, 0.0f}, {1.0f, 1.0f, 1.0f, 0.0f}, {0.5f, 0.5f});
+	gameplayUiTwoSprite_->SetSize({kGameplayUiWidth, kGameplayUiHeight});
 	const uint32_t healthBarTexture = TextureManager::Load("white1x1.png");
+	titleCoverSprite_ = Sprite::Create(healthBarTexture, {0.0f, 0.0f}, {0.0f, 0.0f, 0.0f, 1.0f});
+	titleCoverSprite_->SetSize({static_cast<float>(WinApp::kWindowWidth), static_cast<float>(WinApp::kWindowHeight)});
 	playerHealthFrame_ = Sprite::Create(healthBarTexture, {0.0f, 0.0f}, {0.03f, 0.02f, 0.02f, 0.0f}, {0.0f, 0.5f});
 	playerHealthBackground_ = Sprite::Create(healthBarTexture, {0.0f, 0.0f}, {0.025f, 0.09f, 0.035f, 0.0f}, {0.0f, 0.5f});
 	playerHealthFill_ = Sprite::Create(healthBarTexture, {0.0f, 0.0f}, {0.08f, 0.72f, 0.16f, 0.0f}, {0.0f, 0.5f});
@@ -81,13 +129,18 @@ void GameScene::Initialize() {
 	for (Sprite*& rangeSprite : bossRangeSprites_) {
 		rangeSprite = Sprite::Create(healthBarTexture, {0.0f, 0.0f}, {1.0f, 1.0f, 1.0f, 0.0f});
 	}
-	flowState_ = FlowState::kTitle;
+	flowState_ = FlowState::kIntroFadeIn;
 	endType_ = EndType::kNone;
 	endPhase_ = EndPhase::kNone;
+	bossPhaseState_ = BossPhaseState::kPhaseOne;
 	titleFadeTimer_ = 0.0f;
+	titleIdleTimer_ = 0.0f;
+	gameplayUiIdleTimer_ = 0.0f;
+	titleCoverAlpha_ = 1.0f;
 	healthBarAppearTimer_ = 0.0f;
 	damageInvincibilityTimer_ = 0.0f;
 	endPhaseTimer_ = 0.0f;
+	bossPhaseTimer_ = 0.0f;
 	blackOverlayAlpha_ = 0.0f;
 	whiteFlashAlpha_ = 0.0f;
 	playerHealth_ = kPlayerMaximumHealth;
@@ -105,9 +158,11 @@ void GameScene::Initialize() {
 	bossAIStarted_ = false;
 	mapChipField_->Update();
 	skydome_->Update(cameraController_->GetCamera());
+	UpdateBackgroundSprites();
 }
 
 void GameScene::Update() {
+	player_->UpdateIdleAnimation();
 	if (flowState_ != FlowState::kPlay) {
 		UpdateTitle();
 		return;
@@ -117,12 +172,16 @@ void GameScene::Update() {
 		UpdateHealthBars();
 		mapChipField_->Update();
 		skydome_->Update(cameraController_->GetCamera());
+		UpdateBackgroundSprites();
 		return;
 	}
 
-	// Freeze the player while the camera settles and while dialogue is active.
-	if (!bossEncounterStarted_ || bossAIStarted_) { player_->Update(); }
+	// Freeze the player while the camera settles, during dialogue, and during
+	// the boss's Phase 2 transformation.
+	if ((!bossEncounterStarted_ || bossAIStarted_) && !IsBossPhaseSequenceActive()) { player_->Update(); }
 	cameraController_->Update();
+	UpdateBackgroundSprites();
+	UpdateGameplayTutorialUi();
 	const float visibleRightEdge = cameraController_->GetCamera().translation_.x + kCameraViewHalfWidth;
 	if (!bossEncounterStarted_ && visibleRightEdge >= kBossVisibleLeftX) {
 		StartBossEncounter();
@@ -135,10 +194,11 @@ void GameScene::Update() {
 		dialogueSystem_->Update();
 		if (dialogueSystem_->IsFinished()) { StartBossCombat(); }
 	}
+	UpdateBossPhaseSequence();
 	bossArmature_->Update(player_->GetWorldTransform().translation_);
-	if (bossAIStarted_) {
+	if (bossAIStarted_ && !IsBossPhaseSequenceActive()) {
 		UpdateCombatCollisions();
-		if (endType_ == EndType::kNone) { ResolveBossBodyCollision(); }
+		if (endType_ == EndType::kNone && !IsBossPhaseSequenceActive()) { ResolveBossBodyCollision(); }
 	}
 	UpdateHealthBars();
 #ifdef USE_IMGUI
@@ -153,6 +213,45 @@ void GameScene::StartBossCombat() {
 	bossAIStarted_ = true;
 	bossArmature_->SetAIEnabled(true);
 	StartHealthBarEntrance();
+}
+
+bool GameScene::IsBossPhaseSequenceActive() const {
+	return bossPhaseState_ == BossPhaseState::kDialogue || bossPhaseState_ == BossPhaseState::kTransitionAnimation;
+}
+
+void GameScene::StartBossPhaseDialogue() {
+	if (bossPhaseState_ != BossPhaseState::kPhaseOne || endType_ != EndType::kNone || !bossAIStarted_) { return; }
+	bossPhaseState_ = BossPhaseState::kDialogue;
+	bossPhaseTimer_ = 0.0f;
+	bossArmature_->SetAIEnabled(false);
+	phaseDialogueSystem_->Start();
+}
+
+void GameScene::StartBossPhaseAnimation() {
+	bossPhaseState_ = BossPhaseState::kTransitionAnimation;
+	bossPhaseTimer_ = 0.0f;
+	bossArmature_->BeginPhaseTransition();
+}
+
+void GameScene::UpdateBossPhaseSequence() {
+	if (bossPhaseState_ == BossPhaseState::kDialogue) {
+		phaseDialogueSystem_->Update();
+		if (phaseDialogueSystem_->IsFinished()) { StartBossPhaseAnimation(); }
+		return;
+	}
+	if (bossPhaseState_ != BossPhaseState::kTransitionAnimation) { return; }
+
+	const float duration = (std::max)(kBossPhaseTransitionAnimationDuration, kFrameTime);
+	bossPhaseTimer_ = (std::min)(bossPhaseTimer_ + kFrameTime, duration);
+	bossArmature_->SetPhaseTransitionProgress(SmoothStep(bossPhaseTimer_ / duration));
+	if (bossPhaseTimer_ >= duration) {
+		bossArmature_->EndPhaseTransition();
+		bossPhaseState_ = BossPhaseState::kPhaseTwo;
+		bossPhaseTimer_ = 0.0f;
+		// Phase 2 currently resumes the Phase 1 AI. Its new move set will be
+		// selected here once those moves are authored.
+		bossArmature_->SetAIEnabled(true);
+	}
 }
 
 bool GameScene::Overlaps(
@@ -177,6 +276,10 @@ void GameScene::UpdateCombatCollisions() {
 			bossHealthRatio_ = static_cast<float>(bossHealth_) / static_cast<float>(kBossMaximumHealth);
 			if (bossHealth_ <= 0) {
 				StartBossDefeat();
+				return;
+			}
+			if (bossPhaseState_ == BossPhaseState::kPhaseOne && bossHealthRatio_ <= kBossPhaseTwoHealthRatio) {
+				StartBossPhaseDialogue();
 				return;
 			}
 		}
@@ -535,13 +638,30 @@ void GameScene::DrawEndOverlay() const {
 #ifdef USE_IMGUI
 void GameScene::DrawCombatImGui() {
 	ImGui::SetNextWindowPos(ImVec2(930.0f, 20.0f), ImGuiCond_Always);
-	ImGui::SetNextWindowSize(ImVec2(330.0f, 170.0f), ImGuiCond_Always);
+	ImGui::SetNextWindowSize(ImVec2(330.0f, 275.0f), ImGuiCond_Always);
 	ImGui::Begin("Combat Debug");
 	ImGui::Checkbox("Show boss AI ranges", &showBossRangeVisual_);
 	ImGui::Checkbox("Show collision boxes", &showCollisionDebug_);
 	ImGui::Text("Player health: %d / %d", playerHealth_, kPlayerMaximumHealth);
 	ImGui::Text("Boss health: %d / %d", bossHealth_, kBossMaximumHealth);
 	ImGui::Text("Damage: Player %d | Body %d | Scythe %d", kPlayerAttackDamage, kBossBodyDamage, kScytheDamage);
+	if (ImGui::SliderFloat("Dialogue box opacity", &dialogueBoxOpacity_, 0.0f, 1.0f, "%.2f")) {
+		dialogueSystem_->SetOpacity(dialogueBoxOpacity_);
+		phaseDialogueSystem_->SetOpacity(dialogueBoxOpacity_);
+	}
+	if (ImGui::SliderFloat("Defeat dialogue opacity", &defeatedDialogueOpacity_, 0.0f, 1.0f, "%.2f")) {
+		victoryDialogueSystem_->SetOpacity(defeatedDialogueOpacity_);
+	}
+	const char* phaseName = "Phase 1";
+	if (bossPhaseState_ == BossPhaseState::kDialogue) { phaseName = "Phase dialogue"; }
+	if (bossPhaseState_ == BossPhaseState::kTransitionAnimation) { phaseName = "Phase transition"; }
+	if (bossPhaseState_ == BossPhaseState::kPhaseTwo) { phaseName = "Phase 2"; }
+	ImGui::Text("Boss phase: %s", phaseName);
+	if (bossAIStarted_ && bossPhaseState_ == BossPhaseState::kPhaseOne && ImGui::Button("Test Phase 2 Transition")) {
+		bossHealth_ = (std::min)(bossHealth_, static_cast<int>(static_cast<float>(kBossMaximumHealth) * kBossPhaseTwoHealthRatio));
+		bossHealthRatio_ = static_cast<float>(bossHealth_) / static_cast<float>(kBossMaximumHealth);
+		StartBossPhaseDialogue();
+	}
 	if (ImGui::Button("Instant Player Lose")) { StartPlayerDefeat(); }
 	ImGui::SameLine();
 	if (ImGui::Button("Instant Boss Lose")) { StartBossDefeat(); }
@@ -550,21 +670,172 @@ void GameScene::DrawCombatImGui() {
 #endif
 
 void GameScene::UpdateTitle() {
-	if (flowState_ == FlowState::kTitle && Input::GetInstance()->TriggerKey(DIK_SPACE)) {
-		flowState_ = FlowState::kTitleFadeOut;
-		titleFadeTimer_ = 0.0f;
-	}
+	auto advanceTimer = [&](float duration) {
+		const float safeDuration = (std::max)(duration, kFrameTime);
+		titleFadeTimer_ = (std::min)(titleFadeTimer_ + kFrameTime, safeDuration);
+		return titleFadeTimer_ / safeDuration;
+	};
+	auto updateIdleMovement = [&]() {
+		titleIdleTimer_ += kFrameTime;
+		const float logoCycle = (std::max)(kTitleLogoIdleCycleDuration, kFrameTime);
+		const float promptCycle = (std::max)(kTitlePromptIdleCycleDuration, kFrameTime);
+		const float logoOffset = std::sin(titleIdleTimer_ / logoCycle * 2.0f * std::numbers::pi_v<float>) * kTitleLogoIdleMoveAmount;
+		const float promptOffset = std::sin(titleIdleTimer_ / promptCycle * 2.0f * std::numbers::pi_v<float>) * kTitlePromptIdleMoveAmount;
+		titleLogo_->SetPosition({static_cast<float>(WinApp::kWindowWidth) * 0.5f, kTitleLogoBaseY + logoOffset});
+		titlePromptSprite_->SetPosition({static_cast<float>(WinApp::kWindowWidth) * 0.5f, kTitlePromptBaseY + promptOffset});
+	};
 
-	if (flowState_ == FlowState::kTitleFadeOut) {
-		titleFadeTimer_ = (std::min)(titleFadeTimer_ + kFrameTime, kTitleFadeDuration);
-		float t = titleFadeTimer_ / kTitleFadeDuration;
-		t = t * t * (3.0f - 2.0f * t);
-		if (titleLogo_ != nullptr) { titleLogo_->SetColor({1.0f, 1.0f, 1.0f, 1.0f - t}); }
-		if (titleFadeTimer_ >= kTitleFadeDuration) { flowState_ = FlowState::kPlay; }
+	switch (flowState_) {
+	case FlowState::kIntroFadeIn: {
+		const float progress = SmoothStep(advanceTimer(kIntroSpriteFadeInDuration));
+		introSprite_->SetColor({introSpriteBaseColor_.x, introSpriteBaseColor_.y, introSpriteBaseColor_.z, progress});
+		if (titleFadeTimer_ >= (std::max)(kIntroSpriteFadeInDuration, kFrameTime)) {
+			flowState_ = FlowState::kIntroStay;
+			titleFadeTimer_ = 0.0f;
+		}
+		break;
+	}
+	case FlowState::kIntroStay:
+		introSprite_->SetColor({introSpriteBaseColor_.x, introSpriteBaseColor_.y, introSpriteBaseColor_.z, 1.0f});
+		advanceTimer(kIntroSpriteStayDuration);
+		if (titleFadeTimer_ >= (std::max)(kIntroSpriteStayDuration, kFrameTime)) {
+			flowState_ = FlowState::kIntroFadeOut;
+			titleFadeTimer_ = 0.0f;
+		}
+		break;
+	case FlowState::kIntroFadeOut: {
+		const float progress = SmoothStep(advanceTimer(kIntroSpriteFadeOutDuration));
+		introSprite_->SetColor({introSpriteBaseColor_.x, introSpriteBaseColor_.y, introSpriteBaseColor_.z, 1.0f - progress});
+		if (titleFadeTimer_ >= (std::max)(kIntroSpriteFadeOutDuration, kFrameTime)) {
+			flowState_ = FlowState::kTitleLogoFadeIn;
+			titleFadeTimer_ = 0.0f;
+			titleLogo_->SetColor({1.0f, 1.0f, 1.0f, 0.0f});
+		}
+		break;
+	}
+	case FlowState::kTitleLogoFadeIn: {
+		const float progress = SmoothStep(advanceTimer(kTitleLogoFadeInDuration));
+		titleLogo_->SetColor({1.0f, 1.0f, 1.0f, progress});
+		if (titleFadeTimer_ >= (std::max)(kTitleLogoFadeInDuration, kFrameTime)) {
+			flowState_ = FlowState::kTitleWorldFadeIn;
+			titleFadeTimer_ = 0.0f;
+		}
+		break;
+	}
+	case FlowState::kTitleWorldFadeIn: {
+		const float progress = SmoothStep(advanceTimer(kTitleWorldFadeInDuration));
+		titleCoverAlpha_ = 1.0f - progress;
+		titleCoverSprite_->SetColor({0.0f, 0.0f, 0.0f, titleCoverAlpha_});
+		if (titleFadeTimer_ >= (std::max)(kTitleWorldFadeInDuration, kFrameTime)) {
+			flowState_ = FlowState::kTitlePromptFadeIn;
+			titleFadeTimer_ = 0.0f;
+			titleIdleTimer_ = 0.0f;
+			titleCoverAlpha_ = 0.0f;
+		}
+		break;
+	}
+	case FlowState::kTitlePromptFadeIn: {
+		updateIdleMovement();
+		const float progress = SmoothStep(advanceTimer(kTitlePromptFadeInDuration));
+		titlePromptSprite_->SetColor({1.0f, 1.0f, 1.0f, progress});
+		if (titleFadeTimer_ >= (std::max)(kTitlePromptFadeInDuration, kFrameTime)) {
+			flowState_ = FlowState::kTitle;
+			titleFadeTimer_ = 0.0f;
+		}
+		break;
+	}
+	case FlowState::kTitle:
+		updateIdleMovement();
+		if (Input::GetInstance()->TriggerKey(DIK_SPACE)) {
+			flowState_ = FlowState::kTitleFadeOut;
+			titleFadeTimer_ = 0.0f;
+		}
+		break;
+	case FlowState::kTitleFadeOut: {
+		updateIdleMovement();
+		const float progress = SmoothStep(advanceTimer(kTitleStartFadeOutDuration));
+		titleLogo_->SetColor({1.0f, 1.0f, 1.0f, 1.0f - progress});
+		titlePromptSprite_->SetColor({1.0f, 1.0f, 1.0f, 1.0f - progress});
+		if (titleFadeTimer_ >= (std::max)(kTitleStartFadeOutDuration, kFrameTime)) { flowState_ = FlowState::kPlay; }
+		break;
+	}
+	case FlowState::kPlay:
+		break;
 	}
 
 	mapChipField_->Update();
 	skydome_->Update(cameraController_->GetCamera());
+	UpdateBackgroundSprites();
+}
+
+void GameScene::DrawTitleSequence() const {
+	if (flowState_ == FlowState::kPlay) { return; }
+
+	Sprite::PreDraw();
+	if (flowState_ == FlowState::kIntroFadeIn || flowState_ == FlowState::kIntroStay || flowState_ == FlowState::kIntroFadeOut) {
+		titleCoverSprite_->Draw();
+		introSprite_->Draw();
+	} else {
+		if (flowState_ == FlowState::kTitleLogoFadeIn || flowState_ == FlowState::kTitleWorldFadeIn) {
+			titleCoverSprite_->Draw();
+		}
+		titleLogo_->Draw();
+		if (flowState_ == FlowState::kTitlePromptFadeIn || flowState_ == FlowState::kTitle || flowState_ == FlowState::kTitleFadeOut) {
+			titlePromptSprite_->Draw();
+		}
+	}
+	Sprite::PostDraw();
+}
+
+void GameScene::UpdateBackgroundSprites() {
+	if (backgroundSprites_[0] == nullptr || backgroundSprites_.back() == nullptr) { return; }
+	const Camera& camera = cameraController_->GetCamera();
+	const float pixelsPerWorldX = static_cast<float>(WinApp::kWindowWidth) / (kCameraViewHalfWidth * 2.0f);
+	const float scrollPixels =
+	    (camera.translation_.x - kTitlePlayerX) * pixelsPerWorldX * kBackgroundScrollRatio;
+	float wrappedScroll = std::fmod(scrollPixels, kBackgroundSpriteWidth);
+	if (wrappedScroll < 0.0f) { wrappedScroll += kBackgroundSpriteWidth; }
+	for (size_t index = 0; index < backgroundSprites_.size(); ++index) {
+		backgroundSprites_[index]->SetPosition(
+		    {static_cast<float>(index) * kBackgroundSpriteWidth - wrappedScroll, kBackgroundSpritePositionY});
+	}
+}
+
+void GameScene::DrawBackgroundSprites() const {
+	Sprite::PreDraw();
+	for (Sprite* backgroundSprite : backgroundSprites_) { backgroundSprite->Draw(); }
+	moonSprite_->Draw();
+	Sprite::PostDraw();
+}
+
+void GameScene::UpdateGameplayTutorialUi() {
+	if (gameplayUiOneSprite_ == nullptr || gameplayUiTwoSprite_ == nullptr) { return; }
+
+	gameplayUiIdleTimer_ += kFrameTime;
+	const float idleCycle = (std::max)(kGameplayUiIdleCycleDuration, kFrameTime);
+	const float idleOffset =
+	    std::sin(gameplayUiIdleTimer_ / idleCycle * 2.0f * std::numbers::pi_v<float>) * kGameplayUiIdleMoveAmount;
+	const Camera& camera = cameraController_->GetCamera();
+	const float pixelsPerWorldX = static_cast<float>(WinApp::kWindowWidth) / (kCameraViewHalfWidth * 2.0f);
+	const float pixelsPerWorldY = static_cast<float>(WinApp::kWindowHeight) / (kCameraViewHalfHeight * 2.0f);
+	auto worldToScreen = [&](float worldX) {
+		return Vector2{
+		    static_cast<float>(WinApp::kWindowWidth) * 0.5f + (worldX - camera.translation_.x) * pixelsPerWorldX,
+		    static_cast<float>(WinApp::kWindowHeight) * 0.5f - (kGameplayUiWorldY - camera.translation_.y) * pixelsPerWorldY + idleOffset};
+	};
+	gameplayUiOneSprite_->SetPosition(worldToScreen(kGameplayUiOneWorldX));
+	gameplayUiTwoSprite_->SetPosition(worldToScreen(kGameplayUiTwoWorldX));
+	const float alpha = !bossEncounterStarted_ && endType_ == EndType::kNone ? 1.0f : 0.0f;
+	gameplayUiOneSprite_->SetColor({1.0f, 1.0f, 1.0f, alpha});
+	gameplayUiTwoSprite_->SetColor({1.0f, 1.0f, 1.0f, alpha});
+}
+
+void GameScene::DrawGameplayTutorialUi() const {
+	if (flowState_ != FlowState::kPlay || bossEncounterStarted_ || endType_ != EndType::kNone) { return; }
+	Sprite::PreDraw();
+	gameplayUiOneSprite_->Draw();
+	gameplayUiTwoSprite_->Draw();
+	Sprite::PostDraw();
 }
 
 void GameScene::StartBossEncounter() {
@@ -580,6 +851,10 @@ void GameScene::Draw() {
 	Model::PreDraw(Model::CullingMode::kNone);
 	skydome_->Draw(camera);
 	Model::PostDraw();
+	DrawBackgroundSprites();
+	// Tutorial text belongs to the world background. Drawing it before the map
+	// and player lets the player visibly pass in front of it while walking.
+	DrawGameplayTutorialUi();
 	Model::PreDraw(Model::CullingMode::kNone);
 	mapChipField_->Draw(camera);
 	player_->Draw(camera);
@@ -589,14 +864,11 @@ void GameScene::Draw() {
 	if (flowState_ == FlowState::kPlay) { DrawBossRangeVisual(); }
 	if (flowState_ == FlowState::kPlay) { bossArmature_->DrawDebug(camera); }
 	if (flowState_ == FlowState::kPlay) { DrawCollisionDebug(camera); }
-	if (flowState_ == FlowState::kPlay && dialogueSystem_ != nullptr) { dialogueSystem_->Draw(); }
-	if (flowState_ == FlowState::kPlay && victoryDialogueSystem_ != nullptr) { victoryDialogueSystem_->Draw(); }
-	if (flowState_ != FlowState::kPlay && titleLogo_ != nullptr) {
-		Sprite::PreDraw();
-		titleLogo_->Draw();
-		Sprite::PostDraw();
-	}
 	if (flowState_ == FlowState::kPlay) { DrawHealthBars(); }
+	if (flowState_ == FlowState::kPlay && dialogueSystem_ != nullptr) { dialogueSystem_->Draw(); }
+	if (flowState_ == FlowState::kPlay && phaseDialogueSystem_ != nullptr) { phaseDialogueSystem_->Draw(); }
+	if (flowState_ == FlowState::kPlay && victoryDialogueSystem_ != nullptr) { victoryDialogueSystem_->Draw(); }
+	DrawTitleSequence();
 	DrawEndOverlay();
 }
 
@@ -613,9 +885,20 @@ GameScene::~GameScene() {
 	delete playerHealthFill_;
 	delete playerHealthBackground_;
 	delete playerHealthFrame_;
+	delete moonSprite_;
+	for (Sprite*& backgroundSprite : backgroundSprites_) {
+		delete backgroundSprite;
+		backgroundSprite = nullptr;
+	}
+	delete gameplayUiTwoSprite_;
+	delete gameplayUiOneSprite_;
+	delete titlePromptSprite_;
 	delete titleLogo_;
+	delete titleCoverSprite_;
+	delete introSprite_;
 	delete defeatParticleModel_;
 	delete victoryDialogueSystem_;
+	delete phaseDialogueSystem_;
 	delete dialogueSystem_;
 	delete bossArmature_;
 	delete skydome_;

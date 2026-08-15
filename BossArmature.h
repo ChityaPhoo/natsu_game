@@ -19,6 +19,9 @@ public:
 	void SetHorizontalBounds(float minX, float maxX);
 	void SetVisible(bool visible) { isVisible_ = visible; }
 	void SetDefeatBrightness(float brightness);
+	void BeginPhaseTransition();
+	void SetPhaseTransitionProgress(float progress);
+	void EndPhaseTransition();
 	CollisionBox GetBodyHitbox() const;
 	CollisionBox GetScytheHitbox() const;
 	bool IsScytheAttackActive() const;
@@ -106,6 +109,8 @@ private:
 	void InitializeArmSegment(ModelPart& part, const char* modelName, JointIndex startJoint, JointIndex endJoint);
 	void UpdateModelPart(ModelPart& part);
 	void ResetPose();
+	void ClearIdlePose();
+	void UpdateIdleAnimation();
 	void InitializeNormalAttackClip();
 	void InitializeScytheThrowClip();
 	void InitializeSpinAttackClip();
@@ -155,6 +160,7 @@ private:
 	bool loopAnimation_ = false;
 	bool pauseAnimation_ = false;
 	bool aiEnabled_ = false;
+	bool phaseTransitionActive_ = false;
 	AnimationType activeAnimation_ = AnimationType::kNone;
 	ControlMode controlMode_ = ControlMode::kPlayTest;
 	AIState aiState_ = AIState::kWaiting;
@@ -172,6 +178,12 @@ private:
 	int lastAIRoll_ = -1;
 	uint32_t randomState_ = 0x4D595DF4u;
 	float jointRadius_ = 0.10f;
+	// Boss breathing/idle animation tuning. The root joint drives the entire
+	// assembled model so every body part stays connected.
+	float idleMoveAmount_ = 0.075f;
+	float idleScaleAmount_ = 0.022f;
+	float idleCycleDuration_ = 2.80f;
+	float idleAnimationTimer_ = 0.0f;
 	// Damage-hitbox defaults. They can also be edited live in the Boss
 	// Armature ImGui window under "Damage Hitboxes".
 	float bodyHitboxHalfWidth_ = 2.15f;
@@ -202,13 +214,13 @@ private:
 	float spinDashSpeed_ = 2.2f;
 	float spinDashStopDistance_ = 1.8f;
 	float movementMinX_ = 3.0f;
-	float movementMaxX_ = 57.0f;
+	float movementMaxX_ = 97.0f;
 	int closeMeleeChance_ = 65;
 	int midSpinChance_ = 55;
 	int farThrowChance_ = 100;
 	float animationTime_ = 0.0f;
 	static inline const float kFrameTime = 1.0f / 60.0f;
-	static inline const float kInitialBossX = 56.0f;
+	static inline const float kInitialBossX = 96.0f;
 	static inline const float kNormalAttackDuration = 1.35f;
 	static inline const float kScytheThrowDuration = 2.45f;
 	static inline const float kSpinAttackDuration = 1.95f;

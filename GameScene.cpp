@@ -114,14 +114,16 @@ void GameScene::Initialize() {
 	    gameplayUiTwoTexture, {0.0f, 0.0f}, {1.0f, 1.0f, 1.0f, 0.0f}, {0.5f, 0.5f});
 	gameplayUiTwoSprite_->SetSize({kGameplayUiWidth, kGameplayUiHeight});
 	const uint32_t healthBarTexture = TextureManager::Load("white1x1.png");
+	const uint32_t playerHealthFillTexture = TextureManager::Load("hp.png");
+	const uint32_t bossHealthFillTexture = TextureManager::Load("boss hp.png");
 	titleCoverSprite_ = Sprite::Create(healthBarTexture, {0.0f, 0.0f}, {0.0f, 0.0f, 0.0f, 1.0f});
 	titleCoverSprite_->SetSize({static_cast<float>(WinApp::kWindowWidth), static_cast<float>(WinApp::kWindowHeight)});
 	playerHealthFrame_ = Sprite::Create(healthBarTexture, {0.0f, 0.0f}, {0.03f, 0.02f, 0.02f, 0.0f}, {0.0f, 0.5f});
 	playerHealthBackground_ = Sprite::Create(healthBarTexture, {0.0f, 0.0f}, {0.025f, 0.09f, 0.035f, 0.0f}, {0.0f, 0.5f});
-	playerHealthFill_ = Sprite::Create(healthBarTexture, {0.0f, 0.0f}, {0.08f, 0.72f, 0.16f, 0.0f}, {0.0f, 0.5f});
+	playerHealthFill_ = Sprite::Create(playerHealthFillTexture, {0.0f, 0.0f}, {1.0f, 1.0f, 1.0f, 0.0f}, {0.0f, 0.5f});
 	bossHealthFrame_ = Sprite::Create(healthBarTexture, {0.0f, 0.0f}, {0.025f, 0.015f, 0.015f, 0.0f}, {0.5f, 0.5f});
 	bossHealthBackground_ = Sprite::Create(healthBarTexture, {0.0f, 0.0f}, {0.10f, 0.025f, 0.025f, 0.0f}, {0.5f, 0.5f});
-	bossHealthFill_ = Sprite::Create(healthBarTexture, {0.0f, 0.0f}, {0.72f, 0.02f, 0.02f, 0.0f}, {0.0f, 0.5f});
+	bossHealthFill_ = Sprite::Create(bossHealthFillTexture, {0.0f, 0.0f}, {1.0f, 1.0f, 1.0f, 0.0f}, {0.0f, 0.5f});
 	blackOverlay_ = Sprite::Create(healthBarTexture, {0.0f, 0.0f}, {0.0f, 0.0f, 0.0f, 0.0f});
 	blackOverlay_->SetSize({static_cast<float>(WinApp::kWindowWidth), static_cast<float>(WinApp::kWindowHeight)});
 	whiteFlashOverlay_ = Sprite::Create(healthBarTexture, {0.0f, 0.0f}, {1.0f, 1.0f, 1.0f, 0.0f});
@@ -164,10 +166,12 @@ void GameScene::Initialize() {
 void GameScene::Update() {
 	player_->UpdateIdleAnimation();
 	if (flowState_ != FlowState::kPlay) {
+		cameraController_->SetDebugMode(false, {});
 		UpdateTitle();
 		return;
 	}
 	if (endType_ != EndType::kNone) {
+		cameraController_->SetDebugMode(false, {});
 		UpdateEndSequence();
 		UpdateHealthBars();
 		mapChipField_->Update();
@@ -176,9 +180,16 @@ void GameScene::Update() {
 		return;
 	}
 
-	// Freeze the player while the camera settles, during dialogue, and during
-	// the boss's Phase 2 transformation.
-	if ((!bossEncounterStarted_ || bossAIStarted_) && !IsBossPhaseSequenceActive()) { player_->Update(); }
+	const bool isBossEditing = bossArmature_->IsEditorCameraActive();
+	const Vector3 bossDebugFocus = {
+	    bossArmature_->GetPosition().x,
+	    bossArmature_->GetPosition().y + 3.5f,
+	    bossArmature_->GetPosition().z};
+	cameraController_->SetDebugMode(isBossEditing, bossDebugFocus);
+
+	// Freeze gameplay input while arranging a boss pose, in addition to the
+	// normal encounter/dialogue/phase-transition freezes.
+	if (!isBossEditing && (!bossEncounterStarted_ || bossAIStarted_) && !IsBossPhaseSequenceActive()) { player_->Update(); }
 	cameraController_->Update();
 	UpdateBackgroundSprites();
 	UpdateGameplayTutorialUi();
@@ -196,7 +207,7 @@ void GameScene::Update() {
 	}
 	UpdateBossPhaseSequence();
 	bossArmature_->Update(player_->GetWorldTransform().translation_);
-	if (bossAIStarted_ && !IsBossPhaseSequenceActive()) {
+	if (!isBossEditing && bossAIStarted_ && !IsBossPhaseSequenceActive()) {
 		UpdateCombatCollisions();
 		if (endType_ == EndType::kNone && !IsBossPhaseSequenceActive()) { ResolveBossBodyCollision(); }
 	}
@@ -285,18 +296,23 @@ void GameScene::UpdateCombatCollisions() {
 		}
 	}
 
-	if (damageInvincibilityTimer_ > 0.0f) { return; }
+	if (damageInvincibilityTimer_ > 0.0f || player_->IsDashInvincible()) { return; }
 	const Player::AttackHitbox playerBody = player_->GetBodyHitbox();
 	const bool scytheHit = bossArmature_->IsScytheAttackActive() && [&]() {
 		const BossArmature::CollisionBox scythe = bossArmature_->GetScytheHitbox();
 		return Overlaps(playerBody.min, playerBody.max, scythe.min, scythe.max);
 	}();
-	const bool bodyHit = Overlaps(playerBody.min, playerBody.max, bossBody.min, bossBody.max);
+	const bool bodyHit = bossArmature_->IsBodyAttackActive() && Overlaps(playerBody.min, playerBody.max, bossBody.min, bossBody.max);
 	if (!scytheHit && !bodyHit) { return; }
 
 	playerHealth_ = (std::max)(0, playerHealth_ - (scytheHit ? kScytheDamage : kBossBodyDamage));
 	playerHealthRatio_ = static_cast<float>(playerHealth_) / static_cast<float>(kPlayerMaximumHealth);
 	damageInvincibilityTimer_ = kDamageInvincibilityDuration;
+	player_->NotifyDamage();
+	cameraController_->StartShake(kPlayerHitShakeDuration, kPlayerHitShakeIntensity);
+	if (scytheHit && bossArmature_->IsVerticalHookAttackActive()) {
+		player_->StartPullToward(bossArmature_->GetPosition().x, kHookPullDistance, kHookPullDuration);
+	}
 	if (playerHealth_ <= 0) { StartPlayerDefeat(); }
 }
 
@@ -536,10 +552,10 @@ void GameScene::UpdateHealthBars() {
 
 	playerHealthFrame_->SetColor({0.03f, 0.02f, 0.02f, 0.96f * easedT});
 	playerHealthBackground_->SetColor({0.025f, 0.09f, 0.035f, 0.94f * easedT});
-	playerHealthFill_->SetColor({0.08f, 0.72f, 0.16f, easedT});
+	playerHealthFill_->SetColor({1.0f, 1.0f, 1.0f, easedT});
 	bossHealthFrame_->SetColor({0.025f, 0.015f, 0.015f, 0.96f * easedT});
 	bossHealthBackground_->SetColor({0.10f, 0.025f, 0.025f, 0.94f * easedT});
-	bossHealthFill_->SetColor({0.72f, 0.02f, 0.02f, easedT});
+	bossHealthFill_->SetColor({1.0f, 1.0f, 1.0f, easedT});
 }
 
 void GameScene::DrawHealthBars() const {
@@ -604,11 +620,15 @@ void GameScene::DrawCollisionDebug(const Camera& camera) const {
 		drawer->DrawLine3d(topLeft, bottomLeft, color);
 	};
 	const Player::AttackHitbox playerBody = player_->GetBodyHitbox();
-	const BossArmature::CollisionBox bossBody = bossArmature_->GetBodyHitbox();
-	const BossArmature::CollisionBox scythe = bossArmature_->GetScytheHitbox();
 	drawBox(playerBody.min, playerBody.max, {0.10f, 1.0f, 0.20f, 1.0f});
-	drawBox(bossBody.min, bossBody.max, {1.0f, 0.10f, 0.10f, 1.0f});
-	drawBox(scythe.min, scythe.max, bossArmature_->IsScytheAttackActive() ? Vector4{1.0f, 0.15f, 0.05f, 1.0f} : Vector4{1.0f, 0.85f, 0.10f, 1.0f});
+	if (bossArmature_->IsBodyAttackActive()) {
+		const BossArmature::CollisionBox bossBody = bossArmature_->GetBodyHitbox();
+		drawBox(bossBody.min, bossBody.max, {1.0f, 0.10f, 0.10f, 1.0f});
+	}
+	if (bossArmature_->IsScytheAttackActive()) {
+		const BossArmature::CollisionBox weapon = bossArmature_->GetScytheHitbox();
+		drawBox(weapon.min, weapon.max, {1.0f, 0.15f, 0.05f, 1.0f});
+	}
 	if (player_->IsAttackActive()) {
 		const Player::AttackHitbox attack = player_->GetAttackHitbox();
 		drawBox(attack.min, attack.max, {0.20f, 0.65f, 1.0f, 1.0f});

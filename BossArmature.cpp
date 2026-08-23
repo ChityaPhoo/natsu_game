@@ -10,36 +10,91 @@
 using namespace KamataEngine;
 
 void BossArmature::Initialize() {
-	InitializeJoint(kRoot, "Root", -1, {kInitialBossX, 1.0f, 0.0f}, {1.0f, 1.0f, 0.0f, 1.0f});
+	InitializeJoint(kRoot, "Root", -1, {kInitialBossX, 1.0f, 0.040f}, {1.0f, 1.0f, 0.0f, 1.0f});
 	InitializeJoint(kBody, "Body", kRoot, {0.0f, 2.80f, 0.0f}, {1.0f, 0.55f, 0.0f, 1.0f});
 	InitializeJoint(kChest, "Chest", kBody, {0.0f, 1.962f, 0.0f}, {1.0f, 0.30f, 0.0f, 1.0f});
 	InitializeJoint(kNeck, "Neck", kChest, {0.0f, 0.717f, 0.0f}, {0.0f, 0.75f, 1.0f, 1.0f});
 	InitializeJoint(kHead, "Head", kNeck, {0.0f, 0.470f, 0.0f}, {0.0f, 0.35f, 1.0f, 1.0f});
-	InitializeJoint(kLeftShoulder, "Left Shoulder", kChest, {1.050f, -0.063f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f});
-	InitializeJoint(kLeftElbow, "Left Elbow", kLeftShoulder, {1.409f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f, 1.0f});
-	InitializeJoint(kLeftHand, "Left Hand", kLeftElbow, {1.410f, 0.0f, 0.0f}, {0.0f, 0.35f, 1.0f, 1.0f});
-	InitializeJoint(kRightShoulder, "Right Shoulder", kChest, {-1.050f, 0.064f, -0.036f}, {1.0f, 0.0f, 0.0f, 1.0f});
-	InitializeJoint(kRightElbow, "Right Elbow", kRightShoulder, {-1.409f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f, 1.0f});
-	InitializeJoint(kRightHand, "Right Hand", kRightElbow, {-1.409f, 0.0f, 0.0f}, {0.0f, 0.35f, 1.0f, 1.0f});
+	InitializeJoint(kLeftShoulder, "Left Shoulder", kChest, {0.020f, -0.593f, 1.130f}, {1.0f, 0.0f, 0.0f, 1.0f});
+	InitializeJoint(kLeftElbow, "Left Elbow", kLeftShoulder, {0.001f, -0.920f, 0.516f}, {0.0f, 1.0f, 0.0f, 1.0f});
+	InitializeJoint(kLeftHand, "Left Hand", kLeftElbow, {0.210f, -1.190f, 0.630f}, {0.0f, 0.35f, 1.0f, 1.0f});
+	InitializeJoint(kRightShoulder, "Right Shoulder", kChest, {-0.260f, -0.593f, -1.056f}, {1.0f, 0.0f, 0.0f, 1.0f});
+	InitializeJoint(kRightElbow, "Right Elbow", kRightShoulder, {0.001f, -0.790f, -0.770f}, {0.0f, 1.0f, 0.0f, 1.0f});
+	InitializeJoint(kRightHand, "Right Hand", kRightElbow, {-1.499f, -1.210f, -0.610f}, {0.0f, 0.35f, 1.0f, 1.0f});
 
-	// The bind pose stays assembled. The attack clip supplies the scythe grip.
+	// Original imported-model alignment pose. This is only the mesh bind
+	// reference; animation and idle use the newer pose below.
+	joints_[kRoot].rotation = {0.0f, -0.410f, 0.0f};
+	joints_[kLeftShoulder].rotation = {0.0f, 0.0f, -0.670f};
+	joints_[kLeftShoulder].scale = {0.700f, 0.700f, 0.700f};
+	joints_[kLeftElbow].rotation = {0.0f, 0.0f, -0.080f};
+	joints_[kRightShoulder].rotation = {0.0f, 0.0f, 0.540f};
+	joints_[kRightShoulder].scale = {0.700f, 0.700f, 0.700f};
+	joints_[kRightElbow].rotation = {-0.220f, -0.240f, 0.960f};
 	for (uint32_t index = 0; index < kJointCount; ++index) {
+		const Matrix4x4 localBind = Matrix4x4Calculation::MakeAffineMatrix(
+		    joints_[index].scale, joints_[index].rotation, joints_[index].translation);
+		modelBindJointWorldMatrices_[index] = joints_[index].parentIndex < 0
+		                                                ? localBind
+		                                                : Matrix4x4Calculation::Multiply(
+		                                                      localBind,
+		                                                      modelBindJointWorldMatrices_[static_cast<uint32_t>(joints_[index].parentIndex)]);
+	}
+
+	// New authored idle/default pose. Animations are offset from these values,
+	// while the arm renderer deforms from the immutable model bind above.
+	joints_[kBody].rotation = {0.0f, 0.0f, 0.200f};
+	joints_[kLeftShoulder].rotation = {0.0f, 0.0f, -0.950f};
+	joints_[kLeftElbow].rotation = {0.0f, 0.0f, -1.270f};
+	joints_[kRightElbow].rotation = {-0.220f, -0.240f, -0.630f};
+
+	// Store the exact bind SRT and its world matrices. The articulated OBJ mesh
+	// groups use these matrices as inverse-bind references.
+	for (uint32_t index = 0; index < kJointCount; ++index) {
+		defaultTranslations_[index] = joints_[index].translation;
 		defaultRotations_[index] = joints_[index].rotation;
+		defaultScales_[index] = joints_[index].scale;
+		const Matrix4x4 localBind = Matrix4x4Calculation::MakeAffineMatrix(
+		    defaultScales_[index], defaultRotations_[index], defaultTranslations_[index]);
+		defaultJointWorldMatrices_[index] = joints_[index].parentIndex < 0
+		                                         ? localBind
+		                                         : Matrix4x4Calculation::Multiply(
+		                                               localBind,
+		                                               defaultJointWorldMatrices_[static_cast<uint32_t>(joints_[index].parentIndex)]);
 	}
 	InitializeNormalAttackClip();
 	InitializeScytheThrowClip();
 	InitializeSpinAttackClip();
 	InitializeVerticalHookClip();
 
-	InitializeModelPart(modelParts_[0], "bossBody", kBody, {0.0f, 2.80f, 0.0f});
-	InitializeModelPart(modelParts_[1], "bossHead", kHead, {0.0f, 6.279f, 0.0f});
-	// Arm meshes are centered unit segments. Their endpoints are fitted to the
-	// animated joints every frame, so OBJ handedness and bind-pose pivots cannot
-	// pull the geometry away from the debug armature.
-	InitializeArmSegment(modelParts_[2], "bossLeftUpperArm", kLeftShoulder, kLeftElbow);
-	InitializeArmSegment(modelParts_[3], "bossLeftLowerArm", kLeftElbow, kLeftHand);
-	InitializeArmSegment(modelParts_[4], "bossRightUpperArm", kRightShoulder, kRightElbow);
-	InitializeArmSegment(modelParts_[5], "bossRightLowerArm", kRightElbow, kRightHand);
+	// The float_* resources are authored around their own local origins. Attach
+	// their useful pivots to the existing armature instead of treating their OBJ
+	// coordinates as already assembled world-space geometry.
+	InitializeLocalModelPart(
+	    modelParts_[0], "float_Body", kBody, {0.0f, 0.138622f, 0.0f},
+	    {2.50f, 2.50f, 2.50f}, {0.0f, -1.80f, 0.0f});
+	InitializeLocalModelPart(
+	    modelParts_[1], "float_Head", kHead, {0.0f, 0.097571f, 0.0f},
+	    {1.80f, 1.80f, 1.80f}, {0.0f, -1.10f, 0.0f});
+	InitializeLocalModelPart(
+	    // The folder names are reversed: float_R_arm contains Palm_L.
+	    modelParts_[2], "float_R_arm", kLeftShoulder, {0.0154f, 0.0404f, 0.1050f},
+	    {3.00f, 3.00f, 3.00f}, {}, 1.0f);
+	InitializeLocalModelPart(
+	    // The folder names are reversed: float_L_arm contains Palm_R.
+	    modelParts_[3], "float_L_arm", kRightShoulder, {0.0158f, 0.0651f, 0.0f},
+	    {3.00f, 3.00f, 3.00f}, {}, -1.0f);
+	// The model was authored front-on. A quarter-turn gives it a side profile;
+	// the root joint's existing 0/PI facing rotation then turns that profile
+	// toward whichever side of the boss the player is standing on.
+	for (ModelPart& part : modelParts_) {
+		part.localRotation.y = -0.5f * std::numbers::pi_v<float>;
+		part.defaultLocalRotation = part.localRotation;
+	}
+	InitializeArticulatedArm(modelParts_[2], "float_R_arm", kLeftElbow, kLeftHand);
+	InitializeArticulatedArm(modelParts_[3], "float_L_arm", kRightElbow, kRightHand);
+	weaponModel_ = Model::CreateFromOBJ("hammer", true);
+	weaponTransform_.Initialize();
 	jointSphereModel_ = Model::CreateSphere(8, 8);
 	defeatColor_.Initialize();
 	defeatColor_.SetColor({1.0f, 1.0f, 1.0f, 1.0f});
@@ -79,12 +134,70 @@ void BossArmature::InitializeArmSegment(ModelPart& part, const char* modelName, 
 	part.followsJointSegment = true;
 }
 
+void BossArmature::InitializeLocalModelPart(
+	ModelPart& part, const char* modelName, JointIndex joint, const Vector3& sourcePivot,
+	const Vector3& localScale, const Vector3& jointOffset, float idleShoulderCompensationSign) {
+	part.model = Model::CreateFromOBJ(modelName, true);
+	part.worldTransform.Initialize();
+	part.joint = joint;
+	part.sourcePivot = sourcePivot;
+	part.localScale = localScale;
+	part.jointOffset = jointOffset;
+	part.defaultSourcePivot = sourcePivot;
+	part.defaultLocalScale = localScale;
+	part.defaultLocalRotation = part.localRotation;
+	part.defaultJointOffset = jointOffset;
+	part.followsJointSegment = false;
+	part.usesLocalAttachment = true;
+	part.idleShoulderCompensationSign = idleShoulderCompensationSign;
+}
+
+void BossArmature::InitializeArticulatedArm(
+    ModelPart& part, const char* modelBaseName, JointIndex elbowJoint, JointIndex handJoint) {
+	// KamataEngine merges all OBJ object groups that share one material into a
+	// single Mesh. Load the mechanically split resources so the three arm
+	// sections can genuinely receive different armature transforms.
+	const std::string baseName = modelBaseName;
+	part.articulatedModels[0] = Model::CreateFromOBJ(baseName + "_upper", true);
+	part.articulatedModels[1] = Model::CreateFromOBJ(baseName + "_lower", true);
+	part.articulatedModels[2] = Model::CreateFromOBJ(baseName + "_palm", true);
+	part.articulatedMeshCount = part.articulatedModels.size();
+
+	for (std::size_t pieceIndex = 0; pieceIndex < part.articulatedMeshCount; ++pieceIndex) {
+		part.articulatedMeshTransforms[pieceIndex].Initialize();
+	}
+	part.articulatedMeshJoints[0] = part.joint;
+	part.articulatedMeshEndJoints[0] = elbowJoint;
+	part.articulatedMeshJoints[1] = elbowJoint;
+	part.articulatedMeshEndJoints[1] = handJoint;
+	part.articulatedMeshJoints[2] = handJoint;
+	part.articulatedMeshEndJoints[2] = kJointCount;
+	for (std::size_t pieceIndex = 0; pieceIndex < part.articulatedMeshCount; ++pieceIndex) {
+		part.inverseBindJointMatrices[pieceIndex] = Matrix4x4Calculation::Inverse(
+		    modelBindJointWorldMatrices_[part.articulatedMeshJoints[pieceIndex]]);
+	}
+	part.usesArticulatedMeshes = true;
+}
+
 void BossArmature::Update(const Vector3& playerPosition) {
 	playerTargetPosition_ = playerPosition;
 	playerDistance_ = std::abs(playerTargetPosition_.x - defaultTranslations_[kRoot].x);
-	UpdateAI();
-	UpdateAnimation();
-	UpdateIdleAnimation();
+	// Both editors freeze AI and breathing. The keyframe editor advances only
+	// while its explicit preview is playing, so a selected frame stays stable.
+	if (controlMode_ == ControlMode::kPlayTest) {
+		UpdateAI();
+		UpdateAnimation();
+		UpdateIdleAnimation();
+	} else if (controlMode_ == ControlMode::kAnimationDebug) {
+		UpdateAnimation();
+		UpdateIdleAnimation();
+	} else if (controlMode_ == ControlMode::kKeyframeEditor && keyframePreviewPlaying_) {
+		UpdateAnimation();
+		if (activeAnimation_ == AnimationType::kNone) {
+			keyframePreviewPlaying_ = false;
+			LoadSelectedKeyframePose();
+		}
+	}
 	for (uint32_t index = 0; index < kJointCount; ++index) {
 		Joint& joint = joints_[index];
 		joint.localMatrix = Matrix4x4Calculation::MakeAffineMatrix(joint.scale, joint.rotation, joint.translation);
@@ -99,11 +212,124 @@ void BossArmature::Update(const Vector3& playerPosition) {
 		joint.markerTransform.TransferMatrix();
 	}
 	UpdateScytheState();
+	UpdateWeaponTransform();
 
 	for (ModelPart& part : modelParts_) { UpdateModelPart(part); }
 }
 
+void BossArmature::UpdateWeaponTransform() {
+	if (weaponModel_ == nullptr) { return; }
+
+	Vector3 center = {};
+	Vector3 axis = {};
+	if (useExplicitScythePose_) {
+		center = explicitScytheCenter_;
+		axis = {std::cos(explicitScytheRotation_), std::sin(explicitScytheRotation_), 0.0f};
+	} else {
+		const Vector3& gripA = joints_[kRightHand].worldPosition;
+		const Vector3& gripB = joints_[kLeftHand].worldPosition;
+		center = {
+		    (gripA.x + gripB.x) * 0.5f,
+		    (gripA.y + gripB.y) * 0.5f,
+		    (gripA.z + gripB.z) * 0.5f};
+		axis = {gripB.x - gripA.x, gripB.y - gripA.y, gripB.z - gripA.z};
+	}
+
+	const float axisLength = std::sqrt(axis.x * axis.x + axis.y * axis.y + axis.z * axis.z);
+	if (axisLength <= 0.0001f) { return; }
+	axis = {axis.x / axisLength, axis.y / axisLength, axis.z / axisLength};
+
+	// The hammer OBJ is modeled along local +Y. Build a stable orthonormal frame
+	// whose Y basis follows the weapon direction. This keeps the imported hammer
+	// fixed between the two animated hands and also supports the detached moves.
+	const Vector3 reference = std::abs(axis.z) < 0.95f ? Vector3{0.0f, 0.0f, 1.0f} : Vector3{0.0f, 1.0f, 0.0f};
+	Vector3 side = {
+	    axis.y * reference.z - axis.z * reference.y,
+	    axis.z * reference.x - axis.x * reference.z,
+	    axis.x * reference.y - axis.y * reference.x};
+	const float sideLength = std::sqrt(side.x * side.x + side.y * side.y + side.z * side.z);
+	side = {side.x / sideLength, side.y / sideLength, side.z / sideLength};
+	const Vector3 depth = {
+	    side.y * axis.z - side.z * axis.y,
+	    side.z * axis.x - side.x * axis.z,
+	    side.x * axis.y - side.y * axis.x};
+
+	Matrix4x4 weaponFrame = Matrix4x4Calculation::MakeIdentity4x4();
+	weaponFrame.m[0][0] = side.x * weaponModelScale_;
+	weaponFrame.m[0][1] = side.y * weaponModelScale_;
+	weaponFrame.m[0][2] = side.z * weaponModelScale_;
+	weaponFrame.m[1][0] = axis.x * weaponModelScale_;
+	weaponFrame.m[1][1] = axis.y * weaponModelScale_;
+	weaponFrame.m[1][2] = axis.z * weaponModelScale_;
+	weaponFrame.m[2][0] = depth.x * weaponModelScale_;
+	weaponFrame.m[2][1] = depth.y * weaponModelScale_;
+	weaponFrame.m[2][2] = depth.z * weaponModelScale_;
+	weaponFrame.m[3][0] = center.x;
+	weaponFrame.m[3][1] = center.y;
+	weaponFrame.m[3][2] = center.z;
+
+	// The grip is near Y=2.65 in the authored mesh; the head extends toward +Y.
+	const Matrix4x4 sourceGripOffset = Matrix4x4Calculation::MakeTranslateMatrix({0.0f, -2.65f, 0.0f});
+	weaponTransform_.matWorld_ = Matrix4x4Calculation::Multiply(sourceGripOffset, weaponFrame);
+	weaponTransform_.TransferMatrix();
+}
+
 void BossArmature::UpdateModelPart(ModelPart& part) {
+	if (part.model == nullptr) { return; }
+	if (part.usesArticulatedMeshes) {
+		const Matrix4x4 sourcePivotOffset = Matrix4x4Calculation::MakeTranslateMatrix({
+		    -part.sourcePivot.x, -part.sourcePivot.y, -part.sourcePivot.z});
+		const Matrix4x4 localAdjustment = Matrix4x4Calculation::MakeAffineMatrix(
+		    part.localScale, part.localRotation, part.jointOffset);
+		const Matrix4x4 modelBindWorld = Matrix4x4Calculation::Multiply(
+		    Matrix4x4Calculation::Multiply(sourcePivotOffset, localAdjustment),
+		    modelBindJointWorldMatrices_[part.joint]);
+		for (std::size_t meshIndex = 0; meshIndex < part.articulatedMeshCount; ++meshIndex) {
+			const JointIndex startJoint = part.articulatedMeshJoints[meshIndex];
+			const JointIndex endJoint = part.articulatedMeshEndJoints[meshIndex];
+			Matrix4x4 jointDelta = {};
+			if (endJoint != kJointCount) {
+				// Deform each arm section between its two armature points. Unlike a
+				// rigid joint attachment, this guarantees that the model elbow and
+				// hand reach the animated elbow/hand even when the bone length or
+				// direction differs from the imported mesh's authored pose.
+				const Vector3 bindStart = Matrix4x4Calculation::TransformPoint(
+				    {}, modelBindJointWorldMatrices_[startJoint]);
+				const Vector3 bindEnd = Matrix4x4Calculation::TransformPoint(
+				    {}, modelBindJointWorldMatrices_[endJoint]);
+				const Vector3 currentStart = joints_[startJoint].worldPosition;
+				const Vector3 currentEnd = joints_[endJoint].worldPosition;
+				auto makeSegmentFrame = [](const Vector3& start, const Vector3& end) {
+					const Vector3 difference = {
+					    end.x - start.x, end.y - start.y, end.z - start.z};
+					const float length = (std::max)(std::sqrt(
+					    difference.x * difference.x + difference.y * difference.y +
+					    difference.z * difference.z), 0.0001f);
+					const float horizontalLength = std::sqrt(
+					    difference.x * difference.x + difference.y * difference.y);
+					const Vector3 rotation = {
+					    0.0f, -std::atan2(difference.z, horizontalLength),
+					    std::atan2(difference.y, difference.x)};
+					return Matrix4x4Calculation::MakeAffineMatrix(
+					    {length, 1.0f, 1.0f}, rotation, start);
+				};
+				const Matrix4x4 bindFrame = makeSegmentFrame(bindStart, bindEnd);
+				const Matrix4x4 currentFrame = makeSegmentFrame(currentStart, currentEnd);
+				jointDelta = Matrix4x4Calculation::Multiply(
+				    Matrix4x4Calculation::Inverse(bindFrame), currentFrame);
+			} else {
+				// The palm is a rigid end piece; its entire transform follows the
+				// hand joint after the forearm has been fitted to elbow -> hand.
+				jointDelta = Matrix4x4Calculation::Multiply(
+				    part.inverseBindJointMatrices[meshIndex], joints_[startJoint].worldMatrix);
+			}
+			WorldTransform& meshTransform = part.articulatedMeshTransforms[meshIndex];
+			meshTransform.matWorld_ = Matrix4x4Calculation::Multiply(modelBindWorld, jointDelta);
+			meshTransform.TransferMatrix();
+		}
+		return;
+	}
+
 	if (part.followsJointSegment) {
 		const Vector3& start = joints_[part.joint].worldPosition;
 		const Vector3& end = joints_[part.segmentEndJoint].worldPosition;
@@ -125,6 +351,36 @@ void BossArmature::UpdateModelPart(ModelPart& part) {
 		return;
 	}
 
+	if (part.usesLocalAttachment) {
+		Vector3 localRotation = part.localRotation;
+		Matrix4x4 attachmentWorld = joints_[part.joint].worldMatrix;
+		const bool isNaturalIdle =
+		    controlMode_ != ControlMode::kPoseEditor && !phaseTransitionActive_ &&
+		    activeAnimation_ == AnimationType::kNone;
+		if (isNaturalIdle && part.idleShoulderCompensationSign != 0.0f) {
+			// Each float arm is already modeled as one complete, naturally bent arm.
+			// Building its idle attachment from the shoulder translation and chest
+			// matrix avoids applying the armature's extra shoulder bend a second time.
+			const Joint& shoulder = joints_[part.joint];
+			const Matrix4x4 shoulderTranslation = Matrix4x4Calculation::MakeAffineMatrix(
+			    {1.0f, 1.0f, 1.0f}, {}, shoulder.translation);
+			attachmentWorld = shoulder.parentIndex < 0
+			                      ? shoulderTranslation
+			                      : Matrix4x4Calculation::Multiply(
+			                            shoulderTranslation,
+			                            joints_[static_cast<uint32_t>(shoulder.parentIndex)].worldMatrix);
+		}
+		const Matrix4x4 sourcePivotOffset = Matrix4x4Calculation::MakeTranslateMatrix({
+		    -part.sourcePivot.x, -part.sourcePivot.y, -part.sourcePivot.z});
+		const Matrix4x4 localAdjustment = Matrix4x4Calculation::MakeAffineMatrix(
+		    part.localScale, localRotation, part.jointOffset);
+		part.worldTransform.matWorld_ = Matrix4x4Calculation::Multiply(
+		    Matrix4x4Calculation::Multiply(sourcePivotOffset, localAdjustment),
+		    attachmentWorld);
+		part.worldTransform.TransferMatrix();
+		return;
+	}
+
 	const Matrix4x4 bindOffset = Matrix4x4Calculation::MakeTranslateMatrix({
 	    -part.bindJointPosition.x, -part.bindJointPosition.y, -part.bindJointPosition.z});
 	part.worldTransform.matWorld_ = Matrix4x4Calculation::Multiply(bindOffset, joints_[part.joint].worldMatrix);
@@ -134,7 +390,21 @@ void BossArmature::UpdateModelPart(ModelPart& part) {
 void BossArmature::Draw(const Camera& camera) {
 	if (!showBossModel_ || !isVisible_) { return; }
 	for (const ModelPart& part : modelParts_) {
-		if (part.model != nullptr) { part.model->Draw(part.worldTransform, camera, &defeatColor_); }
+		if (part.model == nullptr) { continue; }
+		if (part.usesArticulatedMeshes) {
+			DrawArticulatedModelPart(part, camera);
+		} else {
+			part.model->Draw(part.worldTransform, camera, &defeatColor_);
+		}
+	}
+	if (weaponModel_ != nullptr) { weaponModel_->Draw(weaponTransform_, camera, &defeatColor_); }
+}
+
+void BossArmature::DrawArticulatedModelPart(const ModelPart& part, const Camera& camera) const {
+	for (std::size_t pieceIndex = 0; pieceIndex < part.articulatedMeshCount; ++pieceIndex) {
+		if (part.articulatedModels[pieceIndex] == nullptr) { continue; }
+		part.articulatedModels[pieceIndex]->Draw(
+		    part.articulatedMeshTransforms[pieceIndex], camera, &defeatColor_);
 	}
 }
 
@@ -165,12 +435,18 @@ void BossArmature::DrawImGui() {
 	ImGui::Begin("Boss Armature");
 	ImGui::Checkbox("Show boss model", &showBossModel_);
 	ImGui::Checkbox("Show debug armature", &showDebugArmature_);
-	ImGui::Checkbox("Show debug scythe", &showDebugScythe_);
+	ImGui::Checkbox("Show weapon debug", &showDebugScythe_);
 	ImGui::DragFloat("Joint sphere radius", &jointRadius_, 0.005f, 0.02f, 0.50f);
+	ImGui::DragFloat("Weapon model scale", &weaponModelScale_, 0.02f, 0.20f, 3.00f);
 	if (ImGui::CollapsingHeader("Idle Animation", ImGuiTreeNodeFlags_DefaultOpen)) {
 		ImGui::DragFloat("Idle vertical move", &idleMoveAmount_, 0.005f, 0.0f, 0.50f);
 		ImGui::DragFloat("Idle breathing scale", &idleScaleAmount_, 0.001f, 0.0f, 0.15f);
 		ImGui::DragFloat("Idle cycle duration", &idleCycleDuration_, 0.05f, 0.20f, 8.0f, "%.2f sec");
+		ImGui::DragFloat("Relaxed shoulder drop", &idleShoulderDrop_, 0.01f, 0.0f, 1.50f, "%.2f rad");
+		ImGui::DragFloat("Relaxed elbow bend", &idleElbowBend_, 0.01f, 0.0f, 1.50f, "%.2f rad");
+		ImGui::DragFloat("Idle torso lean", &idleTorsoLean_, 0.002f, -0.20f, 0.20f, "%.3f rad");
+		ImGui::DragFloat("Idle head counter tilt", &idleHeadCounterTilt_, 0.002f, -0.20f, 0.20f, "%.3f rad");
+		ImGui::DragFloat("Idle arm sway", &idleArmSway_, 0.002f, 0.0f, 0.25f, "%.3f rad");
 	}
 	if (ImGui::CollapsingHeader("Damage Hitboxes", ImGuiTreeNodeFlags_DefaultOpen)) {
 		ImGui::TextUnformatted("Enable collision boxes in Combat Debug to preview these.");
@@ -178,7 +454,8 @@ void BossArmature::DrawImGui() {
 		ImGui::DragFloat("Body bottom offset", &bodyHitboxBottomOffset_, 0.02f, -4.0f, 4.0f);
 		ImGui::DragFloat("Body head padding", &bodyHitboxTopPadding_, 0.02f, 0.0f, 5.0f);
 		ImGui::DragFloat("Body half depth", &bodyHitboxHalfDepth_, 0.02f, 0.10f, 5.0f);
-		ImGui::DragFloat3("Scythe hitbox padding", &scytheHitboxPadding_.x, 0.02f, 0.0f, 4.0f);
+		ImGui::DragFloat3("Weapon hitbox padding", &scytheHitboxPadding_.x, 0.02f, 0.0f, 4.0f);
+		ImGui::DragFloat("Weapon hitbox scale", &weaponHitboxScale_, 0.01f, 0.20f, 1.25f);
 	}
 
 	ImGui::SeparatorText("Control Mode");
@@ -186,6 +463,13 @@ void BossArmature::DrawImGui() {
 		SetControlMode(ControlMode::kAnimationDebug);
 	}
 	ImGui::SameLine();
+	if (ImGui::RadioButton("Manual Pose Editor", controlMode_ == ControlMode::kPoseEditor)) {
+		SetControlMode(ControlMode::kPoseEditor);
+	}
+	ImGui::SameLine();
+	if (ImGui::RadioButton("Keyframe Editor", controlMode_ == ControlMode::kKeyframeEditor)) {
+		SetControlMode(ControlMode::kKeyframeEditor);
+	}
 	if (ImGui::RadioButton("AI Play Test", controlMode_ == ControlMode::kPlayTest)) {
 		SetControlMode(ControlMode::kPlayTest);
 	}
@@ -239,8 +523,94 @@ void BossArmature::DrawImGui() {
 			if (ImGui::Button("Force Throw")) { EnterAIState(AIState::kScytheThrow); }
 		}
 		if (ImGui::Button("Reset AI and boss position")) { ResetBossPosition(); }
-	} else {
+	} else if (controlMode_ == ControlMode::kAnimationDebug) {
 		ImGui::TextUnformatted("AI inactive: use the Play buttons to inspect each move.");
+	} else if (controlMode_ == ControlMode::kPoseEditor) {
+		ImGui::SeparatorText("Manual Pose Editor");
+		ImGui::TextWrapped(
+		    "AI, breathing, and animation playback are frozen. Edit a pose, open the desired joint/model sections, then take a screenshot.");
+		ImGui::SeparatorText("Debug Camera");
+		ImGui::TextUnformatted("Right mouse drag: orbit");
+		ImGui::TextUnformatted("Middle mouse drag: pan");
+		ImGui::TextUnformatted("Mouse wheel: zoom");
+	} else {
+		ImGui::SeparatorText("Keyframe Editor");
+		ImGui::TextWrapped(
+		    "Choose a move and frame, edit its joint SRT below, then use Play Edited Move to test the changed runtime keyframes.");
+		ImGui::SeparatorText("Debug Camera");
+		ImGui::TextUnformatted("Right mouse drag: orbit");
+		ImGui::TextUnformatted("Middle mouse drag: pan");
+		ImGui::TextUnformatted("Mouse wheel: zoom");
+	}
+
+	if (controlMode_ == ControlMode::kKeyframeEditor) {
+		ImGui::SeparatorText("Editable Keyframes");
+		constexpr const char* kMoveNames[] = {
+		    "Normal Attack", "Scythe Throw", "Spin Attack", "Vertical Hook"};
+		int moveIndex = 0;
+		switch (keyframeEditorAnimation_) {
+		case AnimationType::kNormalAttack: moveIndex = 0; break;
+		case AnimationType::kScytheThrow: moveIndex = 1; break;
+		case AnimationType::kSpinAttack: moveIndex = 2; break;
+		case AnimationType::kVerticalHook: moveIndex = 3; break;
+		case AnimationType::kNone: break;
+		}
+		ImGui::BeginDisabled(keyframePreviewPlaying_);
+		if (ImGui::Combo("Move", &moveIndex, kMoveNames, IM_ARRAYSIZE(kMoveNames))) {
+			constexpr AnimationType kMoveTypes[] = {
+			    AnimationType::kNormalAttack, AnimationType::kScytheThrow,
+			    AnimationType::kSpinAttack, AnimationType::kVerticalHook};
+			keyframeEditorAnimation_ = kMoveTypes[moveIndex];
+			selectedKeyframeIndex_ = 0;
+			LoadSelectedKeyframePose();
+		}
+
+		std::size_t keyframeCount = 0;
+		AttackKeyframe* keyframes = GetEditableKeyframes(keyframeEditorAnimation_, keyframeCount);
+		if (keyframes != nullptr && keyframeCount > 0) {
+			ImGui::Text("Frames: %zu", keyframeCount);
+			ImGui::BeginChild("KeyframeList", ImVec2(0.0f, 145.0f), true);
+			for (std::size_t frameIndex = 0; frameIndex < keyframeCount; ++frameIndex) {
+				char label[64];
+				sprintf_s(label, "Frame %zu   (%.3f sec)", frameIndex + 1, keyframes[frameIndex].time);
+				if (ImGui::Selectable(label, selectedKeyframeIndex_ == frameIndex)) {
+					selectedKeyframeIndex_ = frameIndex;
+					LoadSelectedKeyframePose();
+				}
+			}
+			ImGui::EndChild();
+
+			AttackKeyframe& selected = keyframes[selectedKeyframeIndex_];
+			float minimumTime = selectedKeyframeIndex_ == 0
+			                        ? 0.0f
+			                        : keyframes[selectedKeyframeIndex_ - 1].time + 0.001f;
+			float maximumTime = selectedKeyframeIndex_ + 1 >= keyframeCount
+			                        ? selected.time
+			                        : keyframes[selectedKeyframeIndex_ + 1].time - 0.001f;
+			if (selectedKeyframeIndex_ == keyframeCount - 1) {
+				switch (keyframeEditorAnimation_) {
+				case AnimationType::kNormalAttack: maximumTime = kNormalAttackDuration; break;
+				case AnimationType::kScytheThrow: maximumTime = kScytheThrowDuration; break;
+				case AnimationType::kSpinAttack: maximumTime = kSpinAttackDuration; break;
+				case AnimationType::kVerticalHook: maximumTime = kVerticalHookDuration; break;
+				case AnimationType::kNone: break;
+				}
+			}
+			if (ImGui::DragFloat("Selected frame time", &selected.time, 0.005f, minimumTime, maximumTime, "%.3f sec")) {
+				selected.time = std::clamp(selected.time, minimumTime, maximumTime);
+				animationTime_ = selected.time;
+			}
+			ImGui::Text("Editing Frame %zu", selectedKeyframeIndex_ + 1);
+		}
+		ImGui::EndDisabled();
+
+		if (ImGui::Button("Play Edited Move")) { StartKeyframePreview(); }
+		ImGui::SameLine();
+		if (ImGui::Button("Stop Preview")) { StopKeyframePreview(); }
+		ImGui::Checkbox("Pause preview", &pauseAnimation_);
+		ImGui::SameLine();
+		ImGui::Checkbox("Loop preview", &loopAnimation_);
+		ImGui::Text("Preview: %s", keyframePreviewPlaying_ ? "Playing edited values" : "Selected frame frozen");
 	}
 
 	ImGui::SeparatorText("Animation Tuning");
@@ -274,14 +644,15 @@ void BossArmature::DrawImGui() {
 	ImGui::SeparatorText("Playback Debug");
 	ImGui::Text("Playing: %s", GetActiveAnimationName());
 	if (isScytheDetached_) { ImGui::TextUnformatted("Scythe state: airborne"); }
-	if (controlMode_ == ControlMode::kAnimationDebug) {
+	if (controlMode_ == ControlMode::kAnimationDebug || controlMode_ == ControlMode::kKeyframeEditor) {
 		ImGui::Checkbox("Pause animation", &pauseAnimation_);
 		ImGui::SameLine();
 		ImGui::Checkbox("Loop animation", &loopAnimation_);
 	}
 	const float authoredDuration = GetActiveAnimationDuration();
 	if (authoredDuration > 0.0f) {
-		if (controlMode_ == ControlMode::kAnimationDebug) {
+		if (controlMode_ == ControlMode::kAnimationDebug ||
+		    (controlMode_ == ControlMode::kKeyframeEditor && keyframePreviewPlaying_)) {
 			ImGui::SliderFloat("Timeline", &animationTime_, 0.0f, authoredDuration, "%.2f");
 		}
 		const float effectiveSeconds = GetActivePlaybackDuration() / GetActivePlaybackSpeed();
@@ -290,20 +661,60 @@ void BossArmature::DrawImGui() {
 	const float progress = authoredDuration > 0.0f ? std::clamp(animationTime_ / authoredDuration, 0.0f, 1.0f) : 0.0f;
 	ImGui::ProgressBar(progress, ImVec2(-1.0f, 0.0f));
 	if (controlMode_ == ControlMode::kAnimationDebug) {
+		if (activeAnimation_ != AnimationType::kNone && ImGui::Button("Edit Current Frame")) {
+			FreezeCurrentPoseForEditing();
+		}
+		if (activeAnimation_ != AnimationType::kNone) { ImGui::SameLine(); }
 		if (ImGui::Button("Stop Animation")) { StopAnimation(); }
 		ImGui::SameLine();
 		if (ImGui::Button("Reset pose")) { ResetPose(); }
+	}
+	if (controlMode_ == ControlMode::kAnimationDebug || controlMode_ == ControlMode::kPoseEditor ||
+	    controlMode_ == ControlMode::kKeyframeEditor) {
+		if (controlMode_ == ControlMode::kPoseEditor) {
+			if (ImGui::Button("Reset Editable Pose")) { ResetPose(); }
+			ImGui::SameLine();
+			if (ImGui::Button("Reset Model Attachments")) {
+				for (ModelPart& part : modelParts_) {
+					part.sourcePivot = part.defaultSourcePivot;
+					part.localScale = part.defaultLocalScale;
+					part.localRotation = part.defaultLocalRotation;
+					part.jointOffset = part.defaultJointOffset;
+				}
+			}
+			ImGui::SeparatorText("Imported Model Parts");
+			ImGui::TextWrapped(
+			    "Each imported arm is split by its OBJ object groups: upper pieces follow the shoulder, the lower piece follows the elbow, and Palm follows the hand joint.");
+			constexpr const char* kModelPartNames[] = {"Body Model", "Head Model", "Left Arm Model", "Right Arm Model"};
+			for (std::size_t index = 0; index < modelParts_.size(); ++index) {
+				ModelPart& part = modelParts_[index];
+				ImGui::PushID(static_cast<int>(1000u + index));
+				if (ImGui::TreeNode(kModelPartNames[index])) {
+					ImGui::DragFloat3("Joint offset", &part.jointOffset.x, 0.01f);
+					ImGui::DragFloat3("Model rotation", &part.localRotation.x, 0.01f);
+					ImGui::DragFloat3("Model scale", &part.localScale.x, 0.01f, 0.05f, 10.0f);
+					ImGui::DragFloat3("Source pivot", &part.sourcePivot.x, 0.005f);
+					ImGui::TreePop();
+				}
+				ImGui::PopID();
+			}
+		}
 		ImGui::Separator();
 		ImGui::TextUnformatted("Local SRT (radians for rotation)");
-		ImGui::BeginDisabled(activeAnimation_ != AnimationType::kNone);
+		ImGui::BeginDisabled(
+		    (controlMode_ == ControlMode::kAnimationDebug && activeAnimation_ != AnimationType::kNone) ||
+		    (controlMode_ == ControlMode::kKeyframeEditor && keyframePreviewPlaying_));
 		for (uint32_t index = 0; index < kJointCount; ++index) {
 			Joint& joint = joints_[index];
 			ImGui::PushID(static_cast<int>(index));
 			if (ImGui::TreeNode(joint.name)) {
 				ImGui::Text("Parent: %s", joint.parentIndex < 0 ? "None" : joints_[static_cast<uint32_t>(joint.parentIndex)].name);
-				ImGui::DragFloat3("Translation", &joint.translation.x, 0.01f);
-				ImGui::DragFloat3("Rotation", &joint.rotation.x, 0.01f);
-				ImGui::DragFloat3("Scale", &joint.scale.x, 0.01f, 0.01f, 10.0f);
+				bool changed = ImGui::DragFloat3("Translation", &joint.translation.x, 0.01f);
+				changed |= ImGui::DragFloat3("Rotation", &joint.rotation.x, 0.01f);
+				changed |= ImGui::DragFloat3("Scale", &joint.scale.x, 0.01f, 0.01f, 10.0f);
+				if (changed && controlMode_ == ControlMode::kKeyframeEditor) {
+					StoreJointInSelectedKeyframe(static_cast<JointIndex>(index));
+				}
 				ImGui::Text("World: %.2f, %.2f, %.2f", joint.worldPosition.x, joint.worldPosition.y, joint.worldPosition.z);
 				ImGui::TreePop();
 			}
@@ -325,28 +736,63 @@ void BossArmature::ResetPose() {
 	for (uint32_t index = 0; index < kJointCount; ++index) {
 		joints_[index].translation = defaultTranslations_[index];
 		joints_[index].rotation = defaultRotations_[index];
-		joints_[index].scale = {1.0f, 1.0f, 1.0f};
+		joints_[index].scale = defaultScales_[index];
 	}
 }
 
 void BossArmature::ClearIdlePose() {
 	joints_[kRoot].translation.y = defaultTranslations_[kRoot].y;
 	joints_[kRoot].translation.z = defaultTranslations_[kRoot].z;
-	joints_[kRoot].scale = {1.0f, 1.0f, 1.0f};
+	joints_[kRoot].scale = defaultScales_[kRoot];
+	joints_[kBody].rotation = defaultRotations_[kBody];
+	joints_[kHead].rotation = defaultRotations_[kHead];
+	joints_[kLeftShoulder].rotation = defaultRotations_[kLeftShoulder];
+	joints_[kLeftElbow].rotation = defaultRotations_[kLeftElbow];
+	joints_[kRightShoulder].rotation = defaultRotations_[kRightShoulder];
+	joints_[kRightElbow].rotation = defaultRotations_[kRightElbow];
+	joints_[kLeftShoulder].scale = defaultScales_[kLeftShoulder];
+	joints_[kRightShoulder].scale = defaultScales_[kRightShoulder];
 }
 
 void BossArmature::UpdateIdleAnimation() {
 	idleAnimationTimer_ += kFrameTime;
 	const float cycleDuration = (std::max)(idleCycleDuration_, kFrameTime);
 	if (idleAnimationTimer_ >= cycleDuration) { idleAnimationTimer_ = std::fmod(idleAnimationTimer_, cycleDuration); }
-	if (phaseTransitionActive_ || activeAnimation_ != AnimationType::kNone) { return; }
+	if (phaseTransitionActive_ || activeAnimation_ != AnimationType::kNone) {
+		idleBlendTimer_ = 0.0f;
+		return;
+	}
 
-	const float breath = std::sin(idleAnimationTimer_ / cycleDuration * 2.0f * std::numbers::pi_v<float>);
+	// An attack finishes on the exact authored idle pose. Ease the breathing and
+	// relaxed guard offsets back in instead of applying the current sine value in
+	// one frame, which previously looked like the animation snapped at its end.
+	idleBlendTimer_ = (std::min)(idleBlendTimer_ + kFrameTime, kIdleBlendInDuration);
+	const float idleBlend = SmootherStep(idleBlendTimer_ / kIdleBlendInDuration);
+
+	const float breath =
+	    std::sin(idleAnimationTimer_ / cycleDuration * 2.0f * std::numbers::pi_v<float>) * idleBlend;
 	joints_[kRoot].translation.y = defaultTranslations_[kRoot].y + breath * idleMoveAmount_;
 	joints_[kRoot].scale = {
-	    1.0f - breath * idleScaleAmount_ * 0.45f,
-	    1.0f + breath * idleScaleAmount_,
-	    1.0f - breath * idleScaleAmount_ * 0.45f};
+	    defaultScales_[kRoot].x * (1.0f - breath * idleScaleAmount_ * 0.45f),
+	    defaultScales_[kRoot].y * (1.0f + breath * idleScaleAmount_),
+	    defaultScales_[kRoot].z * (1.0f - breath * idleScaleAmount_ * 0.45f)};
+
+	// The waiting pose is a relaxed scythe guard rather than the authored bind
+	// T-pose. StartAnimation() calls ClearIdlePose(), so attack clips continue to
+	// use their original rotations and return naturally to this pose afterward.
+	const float sway = breath * idleArmSway_;
+	joints_[kBody].rotation.z =
+	    defaultRotations_[kBody].z + facingDirection_ * idleTorsoLean_ * idleBlend;
+	joints_[kHead].rotation.z =
+	    defaultRotations_[kHead].z - facingDirection_ * idleHeadCounterTilt_ * idleBlend;
+	joints_[kLeftShoulder].rotation.z =
+	    defaultRotations_[kLeftShoulder].z - idleShoulderDrop_ * idleBlend + sway;
+	joints_[kLeftElbow].rotation.z =
+	    defaultRotations_[kLeftElbow].z - idleElbowBend_ * idleBlend + sway * 0.35f;
+	joints_[kRightShoulder].rotation.z =
+	    defaultRotations_[kRightShoulder].z + idleShoulderDrop_ * idleBlend - sway;
+	joints_[kRightElbow].rotation.z =
+	    defaultRotations_[kRightElbow].z + idleElbowBend_ * idleBlend - sway * 0.35f;
 }
 
 void BossArmature::BeginPhaseTransition() {
@@ -401,17 +847,24 @@ void BossArmature::EndPhaseTransition() {
 
 void BossArmature::SetControlMode(ControlMode mode) {
 	if (controlMode_ == mode) { return; }
+	const bool leavingEditor =
+	    controlMode_ == ControlMode::kPoseEditor || controlMode_ == ControlMode::kKeyframeEditor;
+	const bool enteringEditor =
+	    mode == ControlMode::kPoseEditor || mode == ControlMode::kKeyframeEditor;
 	StopAnimation();
+	if (enteringEditor || leavingEditor) { ResetPose(); }
 	controlMode_ = mode;
+	keyframePreviewPlaying_ = false;
 	aiState_ = AIState::kWaiting;
 	aiWaitTimer_ = mode == ControlMode::kPlayTest && aiEnabled_ ? 0.25f : 0.0f;
 	retreatTimer_ = 0.0f;
 	lastAIRoll_ = -1;
 	loopAnimation_ = false;
 	pauseAnimation_ = false;
-	showDebugArmature_ = mode == ControlMode::kAnimationDebug;
-	showDebugScythe_ = true;
+	showDebugArmature_ = mode != ControlMode::kPlayTest;
+	showDebugScythe_ = mode != ControlMode::kPlayTest;
 	FacePlayer();
+	if (mode == ControlMode::kKeyframeEditor) { LoadSelectedKeyframePose(); }
 }
 
 void BossArmature::SetAIEnabled(bool enabled) {
@@ -445,6 +898,19 @@ BossArmature::CollisionBox BossArmature::GetBodyHitbox() const {
 }
 
 BossArmature::CollisionBox BossArmature::GetScytheHitbox() const {
+	auto scaleBox = [this](const CollisionBox& box) {
+		const Vector3 center = {
+		    (box.min.x + box.max.x) * 0.5f,
+		    (box.min.y + box.max.y) * 0.5f,
+		    (box.min.z + box.max.z) * 0.5f};
+		const Vector3 half = {
+		    (box.max.x - box.min.x) * 0.5f * weaponHitboxScale_,
+		    (box.max.y - box.min.y) * 0.5f * weaponHitboxScale_,
+		    (box.max.z - box.min.z) * 0.5f * weaponHitboxScale_};
+		return CollisionBox{
+		    {center.x - half.x, center.y - half.y, center.z - half.z},
+		    {center.x + half.x, center.y + half.y, center.z + half.z}};
+	};
 	Vector3 gripA = joints_[kRightHand].worldPosition;
 	Vector3 gripB = joints_[kLeftHand].worldPosition;
 	if (useExplicitScythePose_) {
@@ -462,9 +928,9 @@ BossArmature::CollisionBox BossArmature::GetScytheHitbox() const {
 	const Vector3 difference = {gripB.x - gripA.x, gripB.y - gripA.y, gripB.z - gripA.z};
 	const float length = std::sqrt(difference.x * difference.x + difference.y * difference.y + difference.z * difference.z);
 	if (length <= 0.001f) {
-		return {
+		return scaleBox({
 		    {gripA.x - scytheHitboxPadding_.x, gripA.y - scytheHitboxPadding_.y, gripA.z - scytheHitboxPadding_.z},
-		    {gripA.x + scytheHitboxPadding_.x, gripA.y + scytheHitboxPadding_.y, gripA.z + scytheHitboxPadding_.z}};
+		    {gripA.x + scytheHitboxPadding_.x, gripA.y + scytheHitboxPadding_.y, gripA.z + scytheHitboxPadding_.z}});
 	}
 
 	const Vector3 axis = {difference.x / length, difference.y / length, difference.z / length};
@@ -504,9 +970,9 @@ BossArmature::CollisionBox BossArmature::GetScytheHitbox() const {
 		maximum.y = (std::max)(maximum.y, point.y);
 		maximum.z = (std::max)(maximum.z, point.z);
 	}
-	return {
+	return scaleBox({
 	    {minimum.x - scytheHitboxPadding_.x, minimum.y - scytheHitboxPadding_.y, minimum.z - scytheHitboxPadding_.z},
-	    {maximum.x + scytheHitboxPadding_.x, maximum.y + scytheHitboxPadding_.y, maximum.z + scytheHitboxPadding_.z}};
+	    {maximum.x + scytheHitboxPadding_.x, maximum.y + scytheHitboxPadding_.y, maximum.z + scytheHitboxPadding_.z}});
 }
 
 bool BossArmature::IsScytheAttackActive() const {
@@ -523,6 +989,12 @@ bool BossArmature::IsScytheAttackActive() const {
 		return false;
 	}
 	return false;
+}
+
+bool BossArmature::IsBodyAttackActive() const { return activeAnimation_ != AnimationType::kNone; }
+
+bool BossArmature::IsVerticalHookAttackActive() const {
+	return activeAnimation_ == AnimationType::kVerticalHook && animationTime_ >= 0.32f && animationTime_ <= 0.92f;
 }
 
 void BossArmature::UpdateAI() {
@@ -610,7 +1082,9 @@ void BossArmature::EnterAIState(AIState state) {
 void BossArmature::FacePlayer() {
 	const float difference = playerTargetPosition_.x - defaultTranslations_[kRoot].x;
 	if (std::abs(difference) > 0.001f) { facingDirection_ = difference < 0.0f ? -1.0f : 1.0f; }
-	const float facingRotation = facingDirection_ < 0.0f ? 0.0f : std::numbers::pi_v<float>;
+	const float facingRotation = facingDirection_ < 0.0f
+	                                 ? kIdleFacingYaw
+	                                 : std::numbers::pi_v<float> - kIdleFacingYaw;
 	joints_[kRoot].rotation.y = facingRotation;
 	defaultRotations_[kRoot].y = facingRotation;
 }
@@ -644,61 +1118,62 @@ int BossArmature::NextRandomPercent() {
 void BossArmature::InitializeNormalAttackClip() {
 	for (AttackKeyframe& keyframe : normalAttackKeyframes_) { keyframe = {}; }
 	normalAttackKeyframes_[0].time = 0.00f;
-	normalAttackKeyframes_[1].time = 0.32f;
-	normalAttackKeyframes_[2].time = 0.50f;
-	normalAttackKeyframes_[3].time = 0.69f;
+	normalAttackKeyframes_[1].time = 0.28f;
+	normalAttackKeyframes_[2].time = 0.48f;
+	normalAttackKeyframes_[3].time = 0.65f;
 	normalAttackKeyframes_[4].time = 0.88f;
 	normalAttackKeyframes_[5].time = kNormalAttackDuration;
 
-	// Wind-up: twist the cloak and lift the two-handed grip over the right shoulder.
+	// A readable two-handed scythe swing. The hands first lift the shaft behind
+	// the boss, then cross to the other side quickly so the blade traces one clear
+	// arc. Keep it in the screen-facing plane to avoid twisting the split meshes.
 	AttackPose& windUp = normalAttackKeyframes_[1].pose;
-	windUp.rotationOffsets[kBody].z = 0.12f;
-	windUp.rotationOffsets[kChest].z = 0.34f;
-	windUp.rotationOffsets[kNeck].z = -0.12f;
-	windUp.rotationOffsets[kHead].z = -0.18f;
-	windUp.rotationOffsets[kLeftShoulder].z = 0.04f;
-	windUp.rotationOffsets[kLeftElbow].z = 2.02f;
-	windUp.rotationOffsets[kRightShoulder].z = -3.44f;
-	windUp.rotationOffsets[kRightElbow].z = 1.17f;
+	windUp.translationOffsets[kRoot].x = 0.03f;
+	windUp.rotationOffsets[kBody].z = 0.06f;
+	windUp.rotationOffsets[kChest].z = 0.10f;
+	windUp.rotationOffsets[kHead].z = -0.03f;
+	windUp.rotationOffsets[kLeftShoulder].z = 0.10f;
+	windUp.rotationOffsets[kLeftElbow].z = 0.10f;
+	windUp.rotationOffsets[kRightShoulder].z = -0.15f;
+	windUp.rotationOffsets[kRightElbow].z = 0.15f;
 
-	// Brief anticipation before the cut, with a little extra torso coil.
+	// Hold the weapon back for a few frames so the direction of the attack reads.
 	AttackPose& anticipation = normalAttackKeyframes_[2].pose;
 	anticipation = windUp;
-	anticipation.rotationOffsets[kBody].z = 0.17f;
-	anticipation.rotationOffsets[kChest].z = 0.44f;
-	anticipation.rotationOffsets[kHead].z = -0.22f;
-	anticipation.rotationOffsets[kLeftShoulder].z = -0.02f;
-	anticipation.rotationOffsets[kLeftElbow].z = 2.08f;
-	anticipation.rotationOffsets[kRightShoulder].z = -3.52f;
-	anticipation.rotationOffsets[kRightElbow].z = 1.24f;
-	anticipation.translationOffsets[kBody].y = -0.08f;
+	anticipation.translationOffsets[kRoot].x = 0.05f;
+	anticipation.rotationOffsets[kBody].z = 0.08f;
+	anticipation.rotationOffsets[kChest].z = 0.14f;
+	anticipation.rotationOffsets[kLeftShoulder].z = 0.14f;
+	anticipation.rotationOffsets[kLeftElbow].z = 0.12f;
+	anticipation.rotationOffsets[kRightShoulder].z = -0.20f;
+	anticipation.rotationOffsets[kRightElbow].z = 0.18f;
 
-	// Fast diagonal cut from upper-right to lower-left.
+	// Fast diagonal cut. Both hands stay on the weapon and the torso supplies
+	// most of the apparent power instead of contorting the wrists.
 	AttackPose& strike = normalAttackKeyframes_[3].pose;
 	strike.translationOffsets[kRoot].x = -0.18f;
-	strike.rotationOffsets[kBody].z = -0.18f;
-	strike.rotationOffsets[kChest].z = -0.40f;
-	strike.rotationOffsets[kNeck].z = 0.10f;
-	strike.rotationOffsets[kHead].z = 0.18f;
-	strike.rotationOffsets[kLeftShoulder].z = -3.03f;
-	strike.rotationOffsets[kLeftElbow].z = 1.13f;
-	strike.rotationOffsets[kRightShoulder].z = -5.20f;
-	strike.rotationOffsets[kRightElbow].z = 2.07f;
+	strike.translationOffsets[kRoot].y = 0.02f;
+	strike.rotationOffsets[kBody].z = -0.15f;
+	strike.rotationOffsets[kChest].z = -0.24f;
+	strike.rotationOffsets[kHead].z = 0.05f;
+	strike.rotationOffsets[kLeftShoulder].z = -0.10f;
+	strike.rotationOffsets[kLeftElbow].z = 0.18f;
+	strike.rotationOffsets[kRightShoulder].z = 0.12f;
+	strike.rotationOffsets[kRightElbow].z = -0.12f;
 
-	// Follow-through lets the weapon weight pull the shoulders past the target.
+	// Let the blade's weight carry slightly past the contact pose, then settle.
 	AttackPose& followThrough = normalAttackKeyframes_[4].pose;
-	followThrough.translationOffsets[kRoot].x = -0.24f;
-	followThrough.rotationOffsets[kBody].z = -0.25f;
-	followThrough.rotationOffsets[kChest].z = -0.52f;
-	followThrough.rotationOffsets[kNeck].z = 0.14f;
-	followThrough.rotationOffsets[kHead].z = 0.24f;
-	followThrough.rotationOffsets[kLeftShoulder].z = -2.82f;
-	followThrough.rotationOffsets[kLeftElbow].z = 0.94f;
-	followThrough.rotationOffsets[kRightShoulder].z = -5.02f;
-	followThrough.rotationOffsets[kRightElbow].z = 1.68f;
+	followThrough.translationOffsets[kRoot].x = -0.10f;
+	followThrough.translationOffsets[kRoot].y = 0.01f;
+	followThrough.rotationOffsets[kBody].z = -0.10f;
+	followThrough.rotationOffsets[kChest].z = -0.16f;
+	followThrough.rotationOffsets[kHead].z = 0.03f;
+	followThrough.rotationOffsets[kLeftShoulder].z = -0.08f;
+	followThrough.rotationOffsets[kLeftElbow].z = 0.12f;
+	followThrough.rotationOffsets[kRightShoulder].z = 0.08f;
+	followThrough.rotationOffsets[kRightElbow].z = -0.08f;
 
-	// Recover through the equivalent -2pi angle to avoid spinning the right arm the long way around.
-	normalAttackKeyframes_[5].pose.rotationOffsets[kRightShoulder].z = -2.0f * std::numbers::pi_v<float>;
+	// Keyframe 6 remains zero and returns exactly to the idle pose.
 }
 
 void BossArmature::InitializeScytheThrowClip() {
@@ -712,79 +1187,67 @@ void BossArmature::InitializeScytheThrowClip() {
 	scytheThrowKeyframes_[6].time = kScytheCatchTime;
 	scytheThrowKeyframes_[7].time = kScytheThrowDuration;
 
-	// First transfer the shaft into the throwing-side hand. The support arm
-	// folds toward the chest instead of beginning the normal two-handed slash.
+	// Simple one-handed throw: transfer, pull back, release, track, and catch.
+	// All arm motion stays in the screen-facing plane to keep the split arm
+	// model connected and readable.
 	AttackPose& gripTransfer = scytheThrowKeyframes_[1].pose;
-	gripTransfer.rotationOffsets[kBody].z = 0.04f;
-	gripTransfer.rotationOffsets[kChest].z = 0.10f;
+	gripTransfer.rotationOffsets[kBody].z = 0.03f;
+	gripTransfer.rotationOffsets[kChest].z = 0.06f;
 	gripTransfer.rotationOffsets[kLeftShoulder].z = 0.12f;
-	gripTransfer.rotationOffsets[kLeftElbow].z = 2.15f;
-	gripTransfer.rotationOffsets[kRightShoulder].z = 0.55f;
-	gripTransfer.rotationOffsets[kRightElbow].z = -0.35f;
+	gripTransfer.rotationOffsets[kLeftElbow].z = 0.45f;
+	gripTransfer.rotationOffsets[kRightShoulder].z = -0.20f;
+	gripTransfer.rotationOffsets[kRightElbow].z = 0.20f;
 
-	// Rear-loaded one-handed wind-up. Rotating the right shoulder from pi toward
-	// 2pi makes its naturally left-facing arm travel over the head to release.
+	// Pull the throwing hand behind the shoulder without circling it around the body.
 	AttackPose& windUp = scytheThrowKeyframes_[2].pose;
-	windUp.translationOffsets[kRoot].x = 0.10f;
-	windUp.translationOffsets[kBody].y = -0.06f;
-	windUp.rotationOffsets[kBody].z = 0.16f;
-	windUp.rotationOffsets[kChest].z = 0.34f;
-	windUp.rotationOffsets[kNeck].z = -0.10f;
-	windUp.rotationOffsets[kHead].z = -0.16f;
-	windUp.rotationOffsets[kLeftShoulder].z = 0.30f;
-	windUp.rotationOffsets[kLeftElbow].z = 2.42f;
-	windUp.rotationOffsets[kRightShoulder].z = 3.25f;
-	windUp.rotationOffsets[kRightElbow].z = -1.10f;
+	windUp.translationOffsets[kRoot].x = 0.06f;
+	windUp.rotationOffsets[kBody].z = 0.10f;
+	windUp.rotationOffsets[kChest].z = 0.16f;
+	windUp.rotationOffsets[kHead].z = -0.05f;
+	windUp.rotationOffsets[kLeftShoulder].z = 0.18f;
+	windUp.rotationOffsets[kLeftElbow].z = 0.65f;
+	windUp.rotationOffsets[kRightShoulder].z = -0.65f;
+	windUp.rotationOffsets[kRightElbow].z = 0.55f;
 
-	// Lead with the cloak and chest, straighten the throwing arm, and release.
+	// Step toward the player and extend the throwing arm for a clear release.
 	AttackPose& release = scytheThrowKeyframes_[3].pose;
-	release.translationOffsets[kRoot].x = -0.16f;
-	release.rotationOffsets[kBody].z = -0.14f;
-	release.rotationOffsets[kChest].z = -0.30f;
-	release.rotationOffsets[kNeck].z = 0.08f;
-	release.rotationOffsets[kHead].z = 0.14f;
-	release.rotationOffsets[kLeftShoulder].z = 0.18f;
-	release.rotationOffsets[kLeftElbow].z = 0.42f;
-	release.rotationOffsets[kRightShoulder].z = 6.05f;
-	release.rotationOffsets[kRightElbow].z = 0.02f;
+	release.translationOffsets[kRoot].x = -0.12f;
+	release.rotationOffsets[kBody].z = -0.12f;
+	release.rotationOffsets[kChest].z = -0.20f;
+	release.rotationOffsets[kHead].z = 0.06f;
+	release.rotationOffsets[kLeftShoulder].z = 0.15f;
+	release.rotationOffsets[kLeftElbow].z = 0.60f;
+	release.rotationOffsets[kRightShoulder].z = -1.10f;
+	release.rotationOffsets[kRightElbow].z = 0.95f;
 
-	// The empty throwing hand continues past release while the free arm opens in
-	// the opposite direction to balance the blade-heavy weapon's momentum.
+	// Small follow-through while the weapon is airborne.
 	AttackPose& followThrough = scytheThrowKeyframes_[4].pose;
-	followThrough.translationOffsets[kRoot].x = -0.22f;
-	followThrough.rotationOffsets[kBody].z = -0.20f;
-	followThrough.rotationOffsets[kChest].z = -0.40f;
-	followThrough.rotationOffsets[kNeck].z = 0.12f;
-	followThrough.rotationOffsets[kHead].z = 0.20f;
-	followThrough.rotationOffsets[kLeftShoulder].z = 0.32f;
-	followThrough.rotationOffsets[kLeftElbow].z = 0.18f;
-	followThrough.rotationOffsets[kRightShoulder].z = 6.38f;
-	followThrough.rotationOffsets[kRightElbow].z = 0.28f;
+	followThrough.translationOffsets[kRoot].x = -0.15f;
+	followThrough.rotationOffsets[kBody].z = -0.10f;
+	followThrough.rotationOffsets[kChest].z = -0.16f;
+	followThrough.rotationOffsets[kHead].z = 0.05f;
+	followThrough.rotationOffsets[kLeftShoulder].z = 0.12f;
+	followThrough.rotationOffsets[kLeftElbow].z = 0.55f;
+	followThrough.rotationOffsets[kRightShoulder].z = -1.20f;
+	followThrough.rotationOffsets[kRightElbow].z = 0.75f;
 
-	// Recover upright and raise the throwing hand to track the returning scythe.
+	// Track the returning blade with the same hand instead of spinning the arm.
 	AttackPose& trackReturn = scytheThrowKeyframes_[5].pose;
-	trackReturn.rotationOffsets[kBody].z = -0.04f;
-	trackReturn.rotationOffsets[kChest].z = -0.10f;
-	trackReturn.rotationOffsets[kHead].z = 0.06f;
-	trackReturn.rotationOffsets[kLeftShoulder].z = 0.12f;
-	trackReturn.rotationOffsets[kLeftElbow].z = 1.72f;
-	trackReturn.rotationOffsets[kRightShoulder].z = 5.98f;
-	trackReturn.rotationOffsets[kRightElbow].z = -0.22f;
+	trackReturn.rotationOffsets[kLeftShoulder].z = 0.10f;
+	trackReturn.rotationOffsets[kLeftElbow].z = 0.45f;
+	trackReturn.rotationOffsets[kRightShoulder].z = -0.70f;
+	trackReturn.rotationOffsets[kRightElbow].z = 0.45f;
 
-	// Catch with the throwing arm extended, then let the elbow and torso absorb
-	// the returning weapon before the support hand takes the shaft again.
+	// Catch with a soft elbow, then keyframe 8 returns directly to idle.
 	AttackPose& catchPose = scytheThrowKeyframes_[6].pose;
-	catchPose.translationOffsets[kRoot].x = -0.08f;
-	catchPose.rotationOffsets[kBody].z = -0.10f;
-	catchPose.rotationOffsets[kChest].z = -0.18f;
-	catchPose.rotationOffsets[kHead].z = 0.10f;
+	catchPose.translationOffsets[kRoot].x = -0.04f;
+	catchPose.rotationOffsets[kBody].z = -0.04f;
+	catchPose.rotationOffsets[kChest].z = -0.08f;
+	catchPose.rotationOffsets[kHead].z = 0.03f;
 	catchPose.rotationOffsets[kLeftShoulder].z = 0.08f;
-	catchPose.rotationOffsets[kLeftElbow].z = 1.80f;
-	catchPose.rotationOffsets[kRightShoulder].z = 6.12f;
-	catchPose.rotationOffsets[kRightElbow].z = 0.05f;
-
-	// End on an equivalent full rotation to prevent a visible shoulder snap.
-	scytheThrowKeyframes_[7].pose.rotationOffsets[kRightShoulder].z = 2.0f * std::numbers::pi_v<float>;
+	catchPose.rotationOffsets[kLeftElbow].z = 0.35f;
+	catchPose.rotationOffsets[kRightShoulder].z = -0.90f;
+	catchPose.rotationOffsets[kRightElbow].z = 0.70f;
 }
 
 void BossArmature::InitializeSpinAttackClip() {
@@ -843,39 +1306,44 @@ void BossArmature::InitializeVerticalHookClip() {
 	verticalHookKeyframes_[4].time = 1.06f;
 	verticalHookKeyframes_[5].time = kVerticalHookDuration;
 
-	// Keep the hand motion deliberately simple. The right arm points toward the
-	// player while the left arm only folds enough to let go of the shaft.
+	// Direct overhead hook: lift, launch vertically oriented blade, pull, regrip.
+	// The scythe's range remains controlled by verticalHookReach_ in
+	// UpdateScytheState; these poses only make the boss's intention readable.
 	AttackPose& prepare = verticalHookKeyframes_[1].pose;
 	prepare.translationOffsets[kRoot].x = 0.03f;
-	prepare.rotationOffsets[kLeftShoulder].z = 0.06f;
-	prepare.rotationOffsets[kLeftElbow].z = 1.20f;
-	prepare.rotationOffsets[kRightShoulder].z = -0.10f;
-	prepare.rotationOffsets[kRightElbow].z = -0.18f;
+	prepare.rotationOffsets[kBody].z = 0.06f;
+	prepare.rotationOffsets[kChest].z = 0.10f;
+	prepare.rotationOffsets[kLeftShoulder].z = 0.12f;
+	prepare.rotationOffsets[kLeftElbow].z = 0.45f;
+	prepare.rotationOffsets[kRightShoulder].z = -0.55f;
+	prepare.rotationOffsets[kRightElbow].z = 0.45f;
 
-	// Release with the throwing arm straight. The supporting hand stays near the
-	// chest and does not perform a second, competing swing.
+	// Extend toward the target as the scythe leaves the hands.
 	AttackPose& release = verticalHookKeyframes_[2].pose;
-	release.translationOffsets[kRoot].x = -0.04f;
-	release.rotationOffsets[kLeftShoulder].z = 0.08f;
-	release.rotationOffsets[kLeftElbow].z = 1.60f;
-	release.rotationOffsets[kRightShoulder].z = 0.02f;
-	release.rotationOffsets[kRightElbow].z = 0.00f;
+	release.translationOffsets[kRoot].x = -0.05f;
+	release.rotationOffsets[kBody].z = -0.08f;
+	release.rotationOffsets[kChest].z = -0.12f;
+	release.rotationOffsets[kLeftShoulder].z = 0.15f;
+	release.rotationOffsets[kLeftElbow].z = 0.55f;
+	release.rotationOffsets[kRightShoulder].z = -0.95f;
+	release.rotationOffsets[kRightElbow].z = 0.85f;
 
-	// Pull with one shallow elbow bend. Keeping this well below a full fold stops
-	// the lower-arm model from crossing through the boss.
+	// Lean back and bend the throwing elbow once to sell the pull.
 	AttackPose& pull = verticalHookKeyframes_[3].pose;
-	pull.translationOffsets[kRoot].x = 0.05f;
-	pull.rotationOffsets[kLeftShoulder].z = 0.08f;
-	pull.rotationOffsets[kLeftElbow].z = 1.60f;
-	pull.rotationOffsets[kRightShoulder].z = 0.02f;
-	pull.rotationOffsets[kRightElbow].z = 0.85f;
+	pull.translationOffsets[kRoot].x = 0.06f;
+	pull.rotationOffsets[kBody].z = 0.06f;
+	pull.rotationOffsets[kChest].z = 0.10f;
+	pull.rotationOffsets[kLeftShoulder].z = 0.12f;
+	pull.rotationOffsets[kLeftElbow].z = 0.50f;
+	pull.rotationOffsets[kRightShoulder].z = -0.55f;
+	pull.rotationOffsets[kRightElbow].z = 0.25f;
 
-	// Relax both elbows smoothly before returning to the unchanged idle pose.
+	// Bring both hands back toward their idle grip before the final zero pose.
 	AttackPose& recoil = verticalHookKeyframes_[4].pose;
-	recoil.rotationOffsets[kLeftShoulder].z = 0.04f;
-	recoil.rotationOffsets[kLeftElbow].z = 0.75f;
-	recoil.rotationOffsets[kRightShoulder].z = 0.01f;
-	recoil.rotationOffsets[kRightElbow].z = 0.40f;
+	recoil.rotationOffsets[kLeftShoulder].z = 0.06f;
+	recoil.rotationOffsets[kLeftElbow].z = 0.20f;
+	recoil.rotationOffsets[kRightShoulder].z = -0.20f;
+	recoil.rotationOffsets[kRightElbow].z = 0.15f;
 }
 
 void BossArmature::StartAnimation(AnimationType animation) {
@@ -884,6 +1352,7 @@ void BossArmature::StartAnimation(AnimationType animation) {
 		for (uint32_t index = 0; index < kJointCount; ++index) {
 			joints_[index].translation = animationBaseTranslations_[index];
 			joints_[index].rotation = animationBaseRotations_[index];
+			joints_[index].scale = animationBaseScales_[index];
 		}
 	}
 	actionTargetPosition_ = playerTargetPosition_;
@@ -891,6 +1360,7 @@ void BossArmature::StartAnimation(AnimationType animation) {
 	for (uint32_t index = 0; index < kJointCount; ++index) {
 		animationBaseTranslations_[index] = joints_[index].translation;
 		animationBaseRotations_[index] = joints_[index].rotation;
+		animationBaseScales_[index] = joints_[index].scale;
 	}
 	activeAnimation_ = animation;
 	animationTime_ = 0.0f;
@@ -898,7 +1368,6 @@ void BossArmature::StartAnimation(AnimationType animation) {
 	useExplicitScythePose_ = false;
 	hasScytheReleaseCenter_ = false;
 	pauseAnimation_ = false;
-	showDebugScythe_ = true;
 }
 
 void BossArmature::StopAnimation() {
@@ -906,6 +1375,7 @@ void BossArmature::StopAnimation() {
 	for (uint32_t index = 0; index < kJointCount; ++index) {
 		joints_[index].translation = animationBaseTranslations_[index];
 		joints_[index].rotation = animationBaseRotations_[index];
+		joints_[index].scale = animationBaseScales_[index];
 	}
 	activeAnimation_ = AnimationType::kNone;
 	animationTime_ = 0.0f;
@@ -913,6 +1383,122 @@ void BossArmature::StopAnimation() {
 	useExplicitScythePose_ = false;
 	hasScytheReleaseCenter_ = false;
 	pauseAnimation_ = false;
+}
+
+void BossArmature::FreezeCurrentPoseForEditing() {
+	if (activeAnimation_ == AnimationType::kNone) {
+		SetControlMode(ControlMode::kPoseEditor);
+		return;
+	}
+
+	// Do not call StopAnimation here: it deliberately restores the clip's base
+	// pose. The editor needs the currently sampled frame exactly as displayed.
+	activeAnimation_ = AnimationType::kNone;
+	animationTime_ = 0.0f;
+	isScytheDetached_ = false;
+	useExplicitScythePose_ = false;
+	hasScytheReleaseCenter_ = false;
+	pauseAnimation_ = false;
+	loopAnimation_ = false;
+	keyframePreviewPlaying_ = false;
+	controlMode_ = ControlMode::kPoseEditor;
+	aiState_ = AIState::kWaiting;
+	retreatTimer_ = 0.0f;
+	showDebugArmature_ = true;
+	showDebugScythe_ = true;
+}
+
+BossArmature::AttackKeyframe* BossArmature::GetEditableKeyframes(
+    AnimationType animation, std::size_t& count) {
+	switch (animation) {
+	case AnimationType::kNormalAttack:
+		count = normalAttackKeyframes_.size();
+		return normalAttackKeyframes_.data();
+	case AnimationType::kScytheThrow:
+		count = scytheThrowKeyframes_.size();
+		return scytheThrowKeyframes_.data();
+	case AnimationType::kSpinAttack:
+		count = spinAttackKeyframes_.size();
+		return spinAttackKeyframes_.data();
+	case AnimationType::kVerticalHook:
+		count = verticalHookKeyframes_.size();
+		return verticalHookKeyframes_.data();
+	case AnimationType::kNone:
+		break;
+	}
+	count = 0;
+	return nullptr;
+}
+
+void BossArmature::LoadSelectedKeyframePose() {
+	std::size_t keyframeCount = 0;
+	AttackKeyframe* keyframes = GetEditableKeyframes(keyframeEditorAnimation_, keyframeCount);
+	if (keyframes == nullptr || keyframeCount == 0) { return; }
+	selectedKeyframeIndex_ = (std::min)(selectedKeyframeIndex_, keyframeCount - 1);
+
+	if (activeAnimation_ != AnimationType::kNone) { StopAnimation(); }
+	ResetPose();
+	FacePlayer();
+	for (uint32_t index = 0; index < kJointCount; ++index) {
+		animationBaseTranslations_[index] = joints_[index].translation;
+		animationBaseRotations_[index] = joints_[index].rotation;
+		animationBaseScales_[index] = joints_[index].scale;
+	}
+
+	// Apply the exact authored keyframe through the same path used by playback.
+	// Temporarily setting activeAnimation_ also preserves the spin-turn scaling.
+	activeAnimation_ = keyframeEditorAnimation_;
+	ApplyAttackPose(
+	    keyframes[selectedKeyframeIndex_].pose,
+	    keyframes[selectedKeyframeIndex_].pose, 0.0f);
+	activeAnimation_ = AnimationType::kNone;
+	animationTime_ = keyframes[selectedKeyframeIndex_].time;
+	isScytheDetached_ = false;
+	useExplicitScythePose_ = false;
+	hasScytheReleaseCenter_ = false;
+}
+
+void BossArmature::StoreJointInSelectedKeyframe(JointIndex jointIndex) {
+	std::size_t keyframeCount = 0;
+	AttackKeyframe* keyframes = GetEditableKeyframes(keyframeEditorAnimation_, keyframeCount);
+	if (keyframes == nullptr || selectedKeyframeIndex_ >= keyframeCount) { return; }
+
+	AttackPose& pose = keyframes[selectedKeyframeIndex_].pose;
+	const uint32_t index = static_cast<uint32_t>(jointIndex);
+	const float rootHorizontalScale = jointIndex == kRoot ? -facingDirection_ : 1.0f;
+	pose.translationOffsets[index] = {
+	    (joints_[index].translation.x - animationBaseTranslations_[index].x) / rootHorizontalScale,
+	    joints_[index].translation.y - animationBaseTranslations_[index].y,
+	    joints_[index].translation.z - animationBaseTranslations_[index].z,
+	};
+	const float spinTurnScale =
+	    keyframeEditorAnimation_ == AnimationType::kSpinAttack && jointIndex == kRoot
+	        ? static_cast<float>((std::max)(spinAttackTurnCount_, 1))
+	        : 1.0f;
+	pose.rotationOffsets[index] = {
+	    joints_[index].rotation.x - animationBaseRotations_[index].x,
+	    (joints_[index].rotation.y - animationBaseRotations_[index].y) / spinTurnScale,
+	    joints_[index].rotation.z - animationBaseRotations_[index].z,
+	};
+	pose.scaleOffsets[index] = {
+	    joints_[index].scale.x - animationBaseScales_[index].x,
+	    joints_[index].scale.y - animationBaseScales_[index].y,
+	    joints_[index].scale.z - animationBaseScales_[index].z,
+	};
+}
+
+void BossArmature::StartKeyframePreview() {
+	ResetPose();
+	FacePlayer();
+	keyframePreviewPlaying_ = true;
+	StartAnimation(keyframeEditorAnimation_);
+}
+
+void BossArmature::StopKeyframePreview() {
+	StopAnimation();
+	keyframePreviewPlaying_ = false;
+	pauseAnimation_ = false;
+	LoadSelectedKeyframePose();
 }
 
 void BossArmature::UpdateAnimation() {
@@ -957,7 +1543,9 @@ void BossArmature::UpdateAnimation() {
 	const float rawT = range > 0.0f ? std::clamp((animationTime_ - start.time) / range, 0.0f, 1.0f) : 1.0f;
 	const bool isConstantSpinSegment =
 	    activeAnimation_ == AnimationType::kSpinAttack && endIndex >= 3 && endIndex <= 6;
-	const float t = isConstantSpinSegment ? rawT : SmoothStep(rawT);
+	const bool isFinalRecovery =
+	    endIndex == keyframeCount - 1 && activeAnimation_ != AnimationType::kSpinAttack;
+	const float t = isConstantSpinSegment ? rawT : (isFinalRecovery ? SmootherStep(rawT) : SmoothStep(rawT));
 	ApplyAttackPose(start.pose, end.pose, t);
 
 	if (animationTime_ >= duration) {
@@ -972,6 +1560,7 @@ void BossArmature::UpdateAnimation() {
 		for (uint32_t index = 0; index < kJointCount; ++index) {
 			joints_[index].translation = animationBaseTranslations_[index];
 			joints_[index].rotation = animationBaseRotations_[index];
+			joints_[index].scale = animationBaseScales_[index];
 		}
 		activeAnimation_ = AnimationType::kNone;
 		animationTime_ = 0.0f;
@@ -985,6 +1574,82 @@ void BossArmature::UpdateAnimation() {
 void BossArmature::UpdateScytheState() {
 	isScytheDetached_ = false;
 	useExplicitScythePose_ = false;
+	const bool previewNormalKeyframe =
+	    controlMode_ == ControlMode::kKeyframeEditor && !keyframePreviewPlaying_ &&
+	    keyframeEditorAnimation_ == AnimationType::kNormalAttack;
+	if (activeAnimation_ == AnimationType::kNormalAttack || previewNormalKeyframe) {
+		const Vector3& gripA = joints_[kRightHand].worldPosition;
+		const Vector3& gripB = joints_[kLeftHand].worldPosition;
+		explicitScytheCenter_ = {
+		    (gripA.x + gripB.x) * 0.5f,
+		    (gripA.y + gripB.y) * 0.5f,
+		    (gripA.z + gripB.z) * 0.5f};
+		const float heldAngle = std::atan2(gripB.y - gripA.y, gripB.x - gripA.x);
+		const float swingDirection = facingDirection_ < 0.0f ? 1.0f : -1.0f;
+		const float loadedAngle = facingDirection_ < 0.0f
+		                              ? 0.35f
+		                              : std::numbers::pi_v<float> - 0.35f;
+		const float contactAngle = loadedAngle + swingDirection * 3.0f;
+		const float followThroughAngle = contactAngle + swingDirection * 0.35f;
+		useExplicitScythePose_ = true;
+
+		auto shortestAngleTo = [](float start, float end) {
+			return std::remainder(end - start, 2.0f * std::numbers::pi_v<float>);
+		};
+		if (animationTime_ <= 0.28f) {
+			const float t = SmoothStep(animationTime_ / 0.28f);
+			explicitScytheRotation_ = heldAngle + shortestAngleTo(heldAngle, loadedAngle) * t;
+		} else if (animationTime_ <= 0.48f) {
+			explicitScytheRotation_ = loadedAngle;
+		} else if (animationTime_ <= 0.65f) {
+			const float t = SmootherStep((animationTime_ - 0.48f) / (0.65f - 0.48f));
+			explicitScytheRotation_ = loadedAngle + (contactAngle - loadedAngle) * t;
+		} else if (animationTime_ <= 0.88f) {
+			const float t = SmoothStep((animationTime_ - 0.65f) / (0.88f - 0.65f));
+			explicitScytheRotation_ = contactAngle + (followThroughAngle - contactAngle) * t;
+		} else {
+			const float t = SmootherStep(
+			    (animationTime_ - 0.88f) / (kNormalAttackDuration - 0.88f));
+			explicitScytheRotation_ =
+			    followThroughAngle + shortestAngleTo(followThroughAngle, heldAngle) * t;
+		}
+
+		// Put both animated hand endpoints onto the visible handle during the main
+		// arc. Blend into this grip during anticipation and release it during the
+		// recovery so neither the arms nor the weapon pop at the clip boundaries.
+		float gripBlend = 1.0f;
+		if (animationTime_ < 0.28f) {
+			gripBlend = SmoothStep(animationTime_ / 0.28f);
+		} else if (animationTime_ > 0.88f) {
+			gripBlend = 1.0f - SmootherStep(
+			    (animationTime_ - 0.88f) / (kNormalAttackDuration - 0.88f));
+		}
+		const Vector3 weaponAxis = {
+		    std::cos(explicitScytheRotation_), std::sin(explicitScytheRotation_), 0.0f};
+		constexpr float kHalfGripSpacing = 0.42f;
+		const Vector3 desiredRightGrip = {
+		    explicitScytheCenter_.x - weaponAxis.x * kHalfGripSpacing,
+		    explicitScytheCenter_.y - weaponAxis.y * kHalfGripSpacing,
+		    explicitScytheCenter_.z};
+		const Vector3 desiredLeftGrip = {
+		    explicitScytheCenter_.x + weaponAxis.x * kHalfGripSpacing,
+		    explicitScytheCenter_.y + weaponAxis.y * kHalfGripSpacing,
+		    explicitScytheCenter_.z};
+		auto blendHandToGrip = [this, gripBlend](JointIndex hand, const Vector3& target) {
+			Joint& joint = joints_[hand];
+			joint.worldPosition = Lerp(joint.worldPosition, target, gripBlend);
+			joint.worldMatrix.m[3][0] = joint.worldPosition.x;
+			joint.worldMatrix.m[3][1] = joint.worldPosition.y;
+			joint.worldMatrix.m[3][2] = joint.worldPosition.z;
+			joint.markerTransform.translation_ = joint.worldPosition;
+			joint.markerTransform.matWorld_ = Matrix4x4Calculation::MakeAffineMatrix(
+			    joint.markerTransform.scale_, joint.markerTransform.rotation_, joint.worldPosition);
+			joint.markerTransform.TransferMatrix();
+		};
+		blendHandToGrip(kRightHand, desiredRightGrip);
+		blendHandToGrip(kLeftHand, desiredLeftGrip);
+		return;
+	}
 	if (activeAnimation_ == AnimationType::kVerticalHook) {
 		constexpr float kHookLaunchTime = 0.32f;
 		constexpr float kHookFullExtensionTime = 0.58f;
@@ -1047,11 +1712,14 @@ void BossArmature::UpdateScytheState() {
 			explicitScytheCenter_ = Lerp(scytheTargetCenter_, twoHandCenter, retraction);
 			explicitScytheRotation_ = 1.5f * std::numbers::pi_v<float>;
 		} else {
-			const float regrip = SmoothStep(std::clamp(
+			const float regrip = SmootherStep(std::clamp(
 			    (animationTime_ - kHookRegripTime) / (kVerticalHookDuration - kHookRegripTime), 0.0f, 1.0f));
+			constexpr float kRegripStartAngle = 1.5f * std::numbers::pi_v<float>;
+			const float twoHandAngle = std::atan2(gripB.y - gripA.y, gripB.x - gripA.x);
+			const float shortestAngle = std::remainder(
+			    twoHandAngle - kRegripStartAngle, 2.0f * std::numbers::pi_v<float>);
 			explicitScytheCenter_ = twoHandCenter;
-			explicitScytheRotation_ =
-			    1.5f * std::numbers::pi_v<float> + 0.5f * std::numbers::pi_v<float> * regrip;
+			explicitScytheRotation_ = kRegripStartAngle + shortestAngle * regrip;
 		}
 		return;
 	}
@@ -1130,10 +1798,12 @@ void BossArmature::UpdateScytheState() {
 	}
 
 	// Move the caught weapon from the throwing hand back into a two-handed grip.
-	const float regripProgress = SmoothStep(std::clamp(
+	const float regripProgress = SmootherStep(std::clamp(
 	    (animationTime_ - kScytheCatchTime) / (kScytheThrowDuration - kScytheCatchTime), 0.0f, 1.0f));
+	const float regripAngle = std::remainder(
+	    twoHandAngle - releaseAngle, 2.0f * std::numbers::pi_v<float>);
 	explicitScytheCenter_ = Lerp(throwingHand, twoHandCenter, regripProgress);
-	explicitScytheRotation_ = releaseAngle + (twoHandAngle - releaseAngle) * regripProgress;
+	explicitScytheRotation_ = releaseAngle + regripAngle * regripProgress;
 }
 
 float BossArmature::GetActiveAnimationDuration() const {
@@ -1236,6 +1906,9 @@ void BossArmature::ApplyAttackPose(const AttackPose& start, const AttackPose& en
 		joints_[index].rotation = Lerp(
 		    {animationBaseRotations_[index].x + start.rotationOffsets[index].x, animationBaseRotations_[index].y + start.rotationOffsets[index].y * spinTurnScale, animationBaseRotations_[index].z + start.rotationOffsets[index].z},
 		    {animationBaseRotations_[index].x + end.rotationOffsets[index].x, animationBaseRotations_[index].y + end.rotationOffsets[index].y * spinTurnScale, animationBaseRotations_[index].z + end.rotationOffsets[index].z}, t);
+		joints_[index].scale = Lerp(
+		    {animationBaseScales_[index].x + start.scaleOffsets[index].x, animationBaseScales_[index].y + start.scaleOffsets[index].y, animationBaseScales_[index].z + start.scaleOffsets[index].z},
+		    {animationBaseScales_[index].x + end.scaleOffsets[index].x, animationBaseScales_[index].y + end.scaleOffsets[index].y, animationBaseScales_[index].z + end.scaleOffsets[index].z}, t);
 	}
 }
 
@@ -1310,8 +1983,22 @@ float BossArmature::SmoothStep(float t) {
 	return t * t * (3.0f - 2.0f * t);
 }
 
+float BossArmature::SmootherStep(float t) {
+	t = std::clamp(t, 0.0f, 1.0f);
+	return t * t * t * (t * (t * 6.0f - 15.0f) + 10.0f);
+}
+
 BossArmature::~BossArmature() {
-	for (ModelPart& part : modelParts_) { delete part.model; part.model = nullptr; }
+	for (ModelPart& part : modelParts_) {
+		delete part.model;
+		part.model = nullptr;
+		for (Model*& articulatedModel : part.articulatedModels) {
+			delete articulatedModel;
+			articulatedModel = nullptr;
+		}
+	}
+	delete weaponModel_;
+	weaponModel_ = nullptr;
 	delete jointSphereModel_;
 	jointSphereModel_ = nullptr;
 }

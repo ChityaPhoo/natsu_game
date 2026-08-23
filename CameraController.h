@@ -9,8 +9,10 @@ public:
 	void Initialize();
 	void ResetCameraPosition();
 	void Update();
+	void StartShake(float duration, float intensity);
 	void LockToPosition(const KamataEngine::Vector3& position, float duration);
 	void Unlock();
+	void SetDebugMode(bool active, const KamataEngine::Vector3& focusPoint);
 	bool IsLocked() const { return isLocked_; }
 	bool IsLockComplete() const { return isLocked_ && !isLockTransitioning_; }
 	void SetPlayer(Player* player) { target_ = player; }
@@ -19,6 +21,9 @@ public:
 	KamataEngine::Camera& GetCamera() { return camera_; }
 
 private:
+	void UpdateDebugCamera();
+	void RemoveShakeOffset();
+	void ApplyShake();
 	static KamataEngine::Vector3 Lerp(const KamataEngine::Vector3& start, const KamataEngine::Vector3& end, float t);
 	static inline const float kInterpolationRate = 0.10f;
 	static inline const float kVelocityBias = 2.0f;
@@ -33,4 +38,21 @@ private:
 	bool isLockTransitioning_ = false;
 	float lockTimer_ = 0.0f;
 	float lockDuration_ = 0.0f;
+	KamataEngine::Vector3 debugFocusPoint_ = {};
+	KamataEngine::Vector3 debugEntryTranslation_ = {};
+	KamataEngine::Vector3 debugEntryRotation_ = {};
+	float debugYaw_ = 0.0f;
+	float debugPitch_ = 0.0f;
+	float debugDistance_ = 15.0f;
+	bool isDebugMode_ = false;
+	KamataEngine::Vector3 shakeOffset_ = {};
+	float shakeTimer_ = 0.0f;
+	float shakeDuration_ = 0.0f;
+	float shakeIntensity_ = 0.0f;
+	float shakePhase_ = 0.0f;
+	static inline const float kDebugRotateSpeed = 0.005f;
+	static inline const float kDebugZoomSpeed = 0.010f;
+	static inline const float kDebugPanSpeed = 0.0015f;
+	static inline const float kDebugMinDistance = 2.0f;
+	static inline const float kDebugMaxDistance = 80.0f;
 };

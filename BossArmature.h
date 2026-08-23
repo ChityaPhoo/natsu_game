@@ -25,9 +25,14 @@ public:
 	CollisionBox GetBodyHitbox() const;
 	CollisionBox GetScytheHitbox() const;
 	bool IsScytheAttackActive() const;
+	bool IsBodyAttackActive() const;
+	bool IsVerticalHookAttackActive() const;
 	KamataEngine::Vector3 GetPosition() const { return joints_[kRoot].worldPosition; }
 	float GetCloseDistance() const { return closeDistance_; }
 	float GetMidDistance() const { return midDistance_; }
+	bool IsEditorCameraActive() const {
+		return controlMode_ == ControlMode::kPoseEditor || controlMode_ == ControlMode::kKeyframeEditor;
+	}
 	void Draw(const KamataEngine::Camera& camera);
 	void DrawDebug(const KamataEngine::Camera& camera);
 #ifdef USE_IMGUI
@@ -60,6 +65,8 @@ private:
 
 	enum class ControlMode {
 		kAnimationDebug,
+		kPoseEditor,
+		kKeyframeEditor,
 		kPlayTest,
 	};
 
@@ -91,12 +98,33 @@ private:
 		JointIndex joint = kRoot;
 		JointIndex segmentEndJoint = kRoot;
 		KamataEngine::Vector3 bindJointPosition = {};
+		KamataEngine::Vector3 sourcePivot = {};
+		KamataEngine::Vector3 localScale = {1.0f, 1.0f, 1.0f};
+		KamataEngine::Vector3 localRotation = {};
+		KamataEngine::Vector3 jointOffset = {};
+		KamataEngine::Vector3 defaultSourcePivot = {};
+		KamataEngine::Vector3 defaultLocalScale = {1.0f, 1.0f, 1.0f};
+		KamataEngine::Vector3 defaultLocalRotation = {};
+		KamataEngine::Vector3 defaultJointOffset = {};
+		std::array<KamataEngine::Model*, 3> articulatedModels = {};
+		std::array<KamataEngine::WorldTransform, 4> articulatedMeshTransforms;
+		std::array<JointIndex, 4> articulatedMeshJoints = {kRoot, kRoot, kRoot, kRoot};
+		std::array<JointIndex, 4> articulatedMeshEndJoints = {
+		    kJointCount, kJointCount, kJointCount, kJointCount};
+		std::array<KamataEngine::Matrix4x4, 4> inverseBindJointMatrices = {};
+		std::size_t articulatedMeshCount = 0;
 		bool followsJointSegment = false;
+		bool usesLocalAttachment = false;
+		bool usesArticulatedMeshes = false;
+		// The imported float arm meshes already hang naturally. Cancel only the
+		// large debug-skeleton shoulder drop while keeping the small idle sway.
+		float idleShoulderCompensationSign = 0.0f;
 	};
 
 	struct AttackPose {
 		std::array<KamataEngine::Vector3, kJointCount> translationOffsets = {};
 		std::array<KamataEngine::Vector3, kJointCount> rotationOffsets = {};
+		std::array<KamataEngine::Vector3, kJointCount> scaleOffsets = {};
 	};
 
 	struct AttackKeyframe {
@@ -107,7 +135,15 @@ private:
 	void InitializeJoint(JointIndex index, const char* name, int32_t parentIndex, const KamataEngine::Vector3& translation, const KamataEngine::Vector4& color);
 	void InitializeModelPart(ModelPart& part, const char* modelName, JointIndex joint, const KamataEngine::Vector3& bindJointPosition);
 	void InitializeArmSegment(ModelPart& part, const char* modelName, JointIndex startJoint, JointIndex endJoint);
+	void InitializeLocalModelPart(
+	    ModelPart& part, const char* modelName, JointIndex joint,
+	    const KamataEngine::Vector3& sourcePivot, const KamataEngine::Vector3& localScale,
+	    const KamataEngine::Vector3& jointOffset, float idleShoulderCompensationSign = 0.0f);
+	void InitializeArticulatedArm(
+	    ModelPart& part, const char* modelBaseName, JointIndex elbowJoint, JointIndex handJoint);
 	void UpdateModelPart(ModelPart& part);
+	void UpdateWeaponTransform();
+	void DrawArticulatedModelPart(const ModelPart& part, const KamataEngine::Camera& camera) const;
 	void ResetPose();
 	void ClearIdlePose();
 	void UpdateIdleAnimation();
@@ -117,6 +153,12 @@ private:
 	void InitializeVerticalHookClip();
 	void StartAnimation(AnimationType animation);
 	void StopAnimation();
+	void FreezeCurrentPoseForEditing();
+	void LoadSelectedKeyframePose();
+	void StoreJointInSelectedKeyframe(JointIndex joint);
+	void StartKeyframePreview();
+	void StopKeyframePreview();
+	AttackKeyframe* GetEditableKeyframes(AnimationType animation, std::size_t& count);
 	void UpdateAnimation();
 	void UpdateScytheState();
 	void SetControlMode(ControlMode mode);
@@ -137,31 +179,43 @@ private:
 	int NextRandomPercent();
 	static KamataEngine::Vector3 Lerp(const KamataEngine::Vector3& start, const KamataEngine::Vector3& end, float t);
 	static float SmoothStep(float t);
+	static float SmootherStep(float t);
 
 	std::array<Joint, kJointCount> joints_;
 	std::array<KamataEngine::Vector3, kJointCount> defaultTranslations_ = {};
 	std::array<KamataEngine::Vector3, kJointCount> defaultRotations_ = {};
+	std::array<KamataEngine::Vector3, kJointCount> defaultScales_ = {};
+	std::array<KamataEngine::Matrix4x4, kJointCount> defaultJointWorldMatrices_ = {};
+	// The imported arm meshes were authored against the earlier alignment pose.
+	// Keep that immutable mesh reference separate from the editable idle pose.
+	std::array<KamataEngine::Matrix4x4, kJointCount> modelBindJointWorldMatrices_ = {};
 	std::array<KamataEngine::Vector3, kJointCount> animationBaseTranslations_ = {};
 	std::array<KamataEngine::Vector3, kJointCount> animationBaseRotations_ = {};
+	std::array<KamataEngine::Vector3, kJointCount> animationBaseScales_ = {};
 	std::array<AttackKeyframe, 6> normalAttackKeyframes_ = {};
 	std::array<AttackKeyframe, 8> scytheThrowKeyframes_ = {};
 	std::array<AttackKeyframe, 8> spinAttackKeyframes_ = {};
 	std::array<AttackKeyframe, 6> verticalHookKeyframes_ = {};
-	std::array<ModelPart, 6> modelParts_;
+	std::array<ModelPart, 4> modelParts_;
+	KamataEngine::Model* weaponModel_ = nullptr;
+	KamataEngine::WorldTransform weaponTransform_;
 	KamataEngine::Model* jointSphereModel_ = nullptr;
 	KamataEngine::ObjectColor defeatColor_;
 	bool showBossModel_ = true;
 	bool isVisible_ = true;
 	bool showDebugArmature_ = false;
-	bool showDebugScythe_ = true;
+	bool showDebugScythe_ = false;
 	bool isScytheDetached_ = false;
 	bool useExplicitScythePose_ = false;
 	bool hasScytheReleaseCenter_ = false;
 	bool loopAnimation_ = false;
 	bool pauseAnimation_ = false;
+	bool keyframePreviewPlaying_ = false;
 	bool aiEnabled_ = false;
 	bool phaseTransitionActive_ = false;
 	AnimationType activeAnimation_ = AnimationType::kNone;
+	AnimationType keyframeEditorAnimation_ = AnimationType::kNormalAttack;
+	std::size_t selectedKeyframeIndex_ = 0;
 	ControlMode controlMode_ = ControlMode::kPlayTest;
 	AIState aiState_ = AIState::kWaiting;
 	KamataEngine::Vector3 playerTargetPosition_ = {};
@@ -178,19 +232,28 @@ private:
 	int lastAIRoll_ = -1;
 	uint32_t randomState_ = 0x4D595DF4u;
 	float jointRadius_ = 0.10f;
+	float weaponModelScale_ = 1.650f;
 	// Boss breathing/idle animation tuning. The root joint drives the entire
 	// assembled model so every body part stays connected.
 	float idleMoveAmount_ = 0.075f;
 	float idleScaleAmount_ = 0.022f;
 	float idleCycleDuration_ = 2.80f;
+	float idleShoulderDrop_ = 0.0f;
+	float idleElbowBend_ = 0.0f;
+	float idleTorsoLean_ = 0.0f;
+	float idleHeadCounterTilt_ = 0.0f;
+	float idleArmSway_ = 0.010f;
 	float idleAnimationTimer_ = 0.0f;
+	float idleBlendTimer_ = 0.0f;
+	static inline const float kIdleBlendInDuration = 0.38f;
 	// Damage-hitbox defaults. They can also be edited live in the Boss
 	// Armature ImGui window under "Damage Hitboxes".
 	float bodyHitboxHalfWidth_ = 2.15f;
 	float bodyHitboxBottomOffset_ = -0.15f;
 	float bodyHitboxTopPadding_ = 1.05f;
 	float bodyHitboxHalfDepth_ = 1.00f;
-	KamataEngine::Vector3 scytheHitboxPadding_ = {0.30f, 0.30f, 0.30f};
+	KamataEngine::Vector3 scytheHitboxPadding_ = {0.20f, 0.20f, 0.20f};
+	float weaponHitboxScale_ = 0.85f;
 	float normalAttackPlaybackSpeed_ = 1.8f;
 	float normalAttackPlaybackDuration_ = 2.20f;
 	float scytheThrowPlaybackSpeed_ = 1.0f;
@@ -221,6 +284,7 @@ private:
 	float animationTime_ = 0.0f;
 	static inline const float kFrameTime = 1.0f / 60.0f;
 	static inline const float kInitialBossX = 96.0f;
+	static inline const float kIdleFacingYaw = -0.410f;
 	static inline const float kNormalAttackDuration = 1.35f;
 	static inline const float kScytheThrowDuration = 2.45f;
 	static inline const float kSpinAttackDuration = 1.95f;

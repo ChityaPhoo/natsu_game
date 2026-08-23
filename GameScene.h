@@ -173,6 +173,10 @@ private:
 	static inline const int kPlayerAttackDamage = 10;
 	static inline const int kBossBodyDamage = 8;
 	static inline const int kScytheDamage = 20;
+	static inline const float kPlayerHitShakeDuration = 0.22f;
+	static inline const float kPlayerHitShakeIntensity = 0.18f;
+	static inline const float kHookPullDistance = 2.40f;
+	static inline const float kHookPullDuration = 0.30f;
 
 	// Phase 2 begins when the boss reaches this fraction of maximum health.
 	// The temporary transition is: compress -> power surge -> settle.

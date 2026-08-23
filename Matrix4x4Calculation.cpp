@@ -1,9 +1,51 @@
 #include "Matrix4x4Calculation.h"
+#include <algorithm>
 #include <cmath>
 
 KamataEngine::Matrix4x4 Matrix4x4Calculation::MakeIdentity4x4() {
 	KamataEngine::Matrix4x4 result = {};
 	for (int row = 0; row < 4; ++row) { result.m[row][row] = 1.0f; }
+	return result;
+}
+
+KamataEngine::Matrix4x4 Matrix4x4Calculation::Inverse(const KamataEngine::Matrix4x4& matrix) {
+	// Gauss-Jordan elimination is compact and also handles the non-uniform
+	// shoulder scale used by the authored boss bind pose.
+	float augmented[4][8] = {};
+	for (int row = 0; row < 4; ++row) {
+		for (int column = 0; column < 4; ++column) {
+			augmented[row][column] = matrix.m[row][column];
+			augmented[row][column + 4] = row == column ? 1.0f : 0.0f;
+		}
+	}
+	for (int pivotColumn = 0; pivotColumn < 4; ++pivotColumn) {
+		int pivotRow = pivotColumn;
+		for (int row = pivotColumn + 1; row < 4; ++row) {
+			if (std::abs(augmented[row][pivotColumn]) > std::abs(augmented[pivotRow][pivotColumn])) {
+				pivotRow = row;
+			}
+		}
+		if (std::abs(augmented[pivotRow][pivotColumn]) <= 0.000001f) { return MakeIdentity4x4(); }
+		if (pivotRow != pivotColumn) {
+			for (int column = 0; column < 8; ++column) {
+				std::swap(augmented[pivotRow][column], augmented[pivotColumn][column]);
+			}
+		}
+		const float divisor = augmented[pivotColumn][pivotColumn];
+		for (int column = 0; column < 8; ++column) { augmented[pivotColumn][column] /= divisor; }
+		for (int row = 0; row < 4; ++row) {
+			if (row == pivotColumn) { continue; }
+			const float factor = augmented[row][pivotColumn];
+			for (int column = 0; column < 8; ++column) {
+				augmented[row][column] -= factor * augmented[pivotColumn][column];
+			}
+		}
+	}
+
+	KamataEngine::Matrix4x4 result = {};
+	for (int row = 0; row < 4; ++row) {
+		for (int column = 0; column < 4; ++column) { result.m[row][column] = augmented[row][column + 4]; }
+	}
 	return result;
 }
 

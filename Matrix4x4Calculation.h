@@ -4,6 +4,7 @@
 class Matrix4x4Calculation {
 public:
 	static KamataEngine::Matrix4x4 MakeIdentity4x4();
+	static KamataEngine::Matrix4x4 Inverse(const KamataEngine::Matrix4x4& matrix);
 	static KamataEngine::Matrix4x4 Multiply(const KamataEngine::Matrix4x4& lhs, const KamataEngine::Matrix4x4& rhs);
 	static KamataEngine::Matrix4x4 MakeTranslateMatrix(const KamataEngine::Vector3& translation);
 	static KamataEngine::Matrix4x4 MakeScaleMatrix(const KamataEngine::Vector3& scale);

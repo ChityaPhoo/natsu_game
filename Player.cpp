@@ -21,6 +21,12 @@ void Player::Initialize() {
 	attackPhase_ = AttackPhase::kCharge;
 	actionTimer_ = 0.0f;
 	dashCooldownTimer_ = 0.0f;
+	damageBlinkTimer_ = 0.0f;
+	pullStartX_ = 0.0f;
+	pullTargetX_ = 0.0f;
+	pullTimer_ = 0.0f;
+	pullDuration_ = 0.0f;
+	pullActive_ = false;
 	idleAnimationTimer_ = 0.0f;
 	isAttackEffectVisible_ = false;
 	currentDirection_ = LRDirection::kRight;
@@ -31,6 +37,7 @@ void Player::Initialize() {
 
 void Player::UpdateIdleAnimation() {
 	idleAnimationTimer_ += kFrameTime;
+	damageBlinkTimer_ = (std::max)(0.0f, damageBlinkTimer_ - kFrameTime);
 	const float cycleDuration = (std::max)(kIdleCycleDuration, kFrameTime);
 	if (idleAnimationTimer_ >= cycleDuration) { idleAnimationTimer_ = std::fmod(idleAnimationTimer_, cycleDuration); }
 }
@@ -41,10 +48,24 @@ void Player::SetPosition(const Vector3& position) {
 }
 
 void Player::ResolveHorizontalPush(float positionX) {
+	pullActive_ = false;
 	worldTransform_.translation_.x = positionX;
 	velocity_.x = 0.0f;
 	UpdateWorldMatrix();
 }
+
+void Player::StartPullToward(float targetX, float maximumDistance, float duration) {
+	const float minimumCenterX = hasLeftBoundary_ ? (std::max)(kMapMinCenterX, leftBoundary_) : kMapMinCenterX;
+	const float distance = std::clamp(targetX - worldTransform_.translation_.x, -std::abs(maximumDistance), std::abs(maximumDistance));
+	pullStartX_ = worldTransform_.translation_.x;
+	pullTargetX_ = std::clamp(pullStartX_ + distance, minimumCenterX, kMapMaxCenterX);
+	pullTimer_ = 0.0f;
+	pullDuration_ = (std::max)(duration, kFrameTime);
+	pullActive_ = std::abs(pullTargetX_ - pullStartX_) > kCollisionEpsilon;
+	velocity_.x = 0.0f;
+}
+
+void Player::NotifyDamage() { damageBlinkTimer_ = kDamageBlinkDuration; }
 
 void Player::Update() {
 	Input* input = Input::GetInstance();
@@ -185,6 +206,7 @@ void Player::Update() {
 	} else if (velocity_.y <= 0.0f) {
 		onGround_ = false;
 	}
+	UpdatePullMotion();
 
 	UpdateRotation();
 	UpdateWorldMatrix();
@@ -296,6 +318,20 @@ bool Player::IsAttackActive() const {
 	return actionState_ == ActionState::kAttack && attackPhase_ == AttackPhase::kStrike;
 }
 
+bool Player::IsDashInvincible() const {
+	return actionState_ == ActionState::kDash && actionTimer_ <= kDashInvincibilityDuration;
+}
+
+void Player::UpdatePullMotion() {
+	if (!pullActive_) { return; }
+	pullTimer_ = (std::min)(pullTimer_ + kFrameTime, pullDuration_);
+	const float t = pullTimer_ / pullDuration_;
+	const float easedT = t * t * (3.0f - 2.0f * t);
+	worldTransform_.translation_.x = std::lerp(pullStartX_, pullTargetX_, easedT);
+	velocity_.x = 0.0f;
+	if (pullTimer_ >= pullDuration_) { pullActive_ = false; }
+}
+
 Player::AttackHitbox Player::GetBodyHitbox() const {
 	const Vector3& center = worldTransform_.translation_;
 	return {
@@ -339,7 +375,9 @@ void Player::Draw(const Camera& camera) {
 	visualTransform_.matWorld_ = Matrix4x4Calculation::MakeAffineMatrix(
 	    visualTransform_.scale_, visualTransform_.rotation_, visualTransform_.translation_);
 	visualTransform_.TransferMatrix();
-	model_->Draw(visualTransform_, camera);
+	const bool blinkHidden = damageBlinkTimer_ > 0.0f &&
+	                         static_cast<int>(damageBlinkTimer_ / kDamageBlinkInterval) % 2 == 0;
+	if (!blinkHidden) { model_->Draw(visualTransform_, camera); }
 
 	if (isAttackEffectVisible_ && attackEffectModel_ != nullptr) {
 		attackEffectModel_->Draw(attackEffectTransform_, camera);

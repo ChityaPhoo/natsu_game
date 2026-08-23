@@ -14,6 +14,8 @@ public:
 	void Initialize();
 	void SetPosition(const KamataEngine::Vector3& position);
 	void ResolveHorizontalPush(float positionX);
+	void StartPullToward(float targetX, float maximumDistance, float duration);
+	void NotifyDamage();
 	void SetMapChipField(MapChipField* mapChipField) { mapChipField_ = mapChipField; }
 	void SetLeftBoundary(float boundary) { leftBoundary_ = boundary; hasLeftBoundary_ = true; }
 	void ClearLeftBoundary() { hasLeftBoundary_ = false; }
@@ -23,6 +25,7 @@ public:
 	const KamataEngine::WorldTransform& GetWorldTransform() const { return worldTransform_; }
 	const KamataEngine::Vector3& GetVelocity() const { return velocity_; }
 	bool IsAttackActive() const;
+	bool IsDashInvincible() const;
 	bool IsFacingRight() const { return currentDirection_ == LRDirection::kRight; }
 	AttackHitbox GetBodyHitbox() const;
 	AttackHitbox GetAttackHitbox() const;
@@ -45,6 +48,7 @@ private:
 	void UpdateRotation();
 	void UpdateWorldMatrix();
 	void UpdateAttackEffectTransform();
+	void UpdatePullMotion();
 	static float EaseOut(float start, float end, float t);
 
 	static inline const float kAcceleration = 0.04f;
@@ -75,7 +79,10 @@ private:
 	static inline const float kDashRecoveryTime = 0.18f;
 	static inline const float kDashBurstSpeed = 0.70f;
 	static inline const float kDashBurstEndSpeed = 0.38f;
-	static inline const float kDashCooldown = 0.30f;
+	static inline const float kDashCooldown = 0.85f;
+	static inline const float kDashInvincibilityDuration = kDashChargeTime + kDashBurstTime;
+	static inline const float kDamageBlinkDuration = 0.75f;
+	static inline const float kDamageBlinkInterval = 0.075f;
 	static inline const float kAttackChargeTime = 0.10f;
 	static inline const float kAttackStrikeTime = 0.12f;
 	static inline const float kAttackRecoveryTime = 0.18f;
@@ -108,8 +115,14 @@ private:
 	float turnTimer_ = 0.0f;
 	float actionTimer_ = 0.0f;
 	float dashCooldownTimer_ = 0.0f;
+	float damageBlinkTimer_ = 0.0f;
+	float pullStartX_ = 0.0f;
+	float pullTargetX_ = 0.0f;
+	float pullTimer_ = 0.0f;
+	float pullDuration_ = 0.0f;
 	float idleAnimationTimer_ = 0.0f;
 	float dashDirection_ = 1.0f;
 	float leftBoundary_ = 0.0f;
 	bool hasLeftBoundary_ = false;
+	bool pullActive_ = false;
 };

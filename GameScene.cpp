@@ -1,4 +1,5 @@
 #include "GameScene.h"
+#include "GamepadInput.h"
 #include "Matrix4x4Calculation.h"
 #include <algorithm>
 #include <cmath>
@@ -38,6 +39,7 @@ void GameScene::Initialize() {
 	bossArmature_ = new BossArmature();
 	bossArmature_->Initialize();
 	bossArmature_->SetAIEnabled(false);
+	bossArmature_->SetPhaseTwo(false);
 	dialogueSystem_ = new DialogueSystem();
 	dialogueSystem_->Initialize(
 	    kBossDialoguePageCount,
@@ -67,12 +69,16 @@ void GameScene::Initialize() {
 	phaseDialogueSystem_->SetOpacity(dialogueBoxOpacity_);
 	victoryDialogueSystem_->SetOpacity(defeatedDialogueOpacity_);
 	defeatParticleModel_ = Model::CreateSphere(6, 6);
+	bossAttackModel_ = Model::CreateFromOBJ("boss_Attack", true);
+	bossAttackWaveModel_ = Model::CreateFromOBJ("boss_AttackWave", true);
 	defeatParticleColor_.Initialize();
 	defeatParticleColor_.SetColor({1.0f, 0.24f, 0.06f, 0.90f});
 	for (DefeatParticle& particle : defeatParticles_) {
 		particle.transform.Initialize();
 		particle.active = false;
 	}
+	for (WorldTransform& transform : groundWaveTransforms_) { transform.Initialize(); }
+	for (WorldTransform& transform : shadowPillarTransforms_) { transform.Initialize(); }
 	const bool hasIntroSprite = kIntroSpriteFile[0] != '\0';
 	const uint32_t introSpriteTexture = TextureManager::Load(hasIntroSprite ? kIntroSpriteFile : "white1x1.png");
 	introSpriteBaseColor_ = {1.0f, 1.0f, 1.0f, 1.0f};
@@ -145,8 +151,8 @@ void GameScene::Initialize() {
 	bossPhaseTimer_ = 0.0f;
 	blackOverlayAlpha_ = 0.0f;
 	whiteFlashAlpha_ = 0.0f;
-	playerHealth_ = kPlayerMaximumHealth;
-	bossHealth_ = kBossMaximumHealth;
+	playerHealth_ = playerMaximumHealth_;
+	bossHealth_ = bossMaximumHealth_;
 	playerHealthRatio_ = 1.0f;
 	bossHealthRatio_ = 1.0f;
 	healthBarsVisible_ = false;
@@ -207,6 +213,9 @@ void GameScene::Update() {
 	}
 	UpdateBossPhaseSequence();
 	bossArmature_->Update(player_->GetWorldTransform().translation_);
+	if (bossArmature_->ConsumeSlamImpact()) {
+		cameraController_->StartShake(kBossSlamShakeDuration, kBossSlamShakeIntensity);
+	}
 	if (!isBossEditing && bossAIStarted_ && !IsBossPhaseSequenceActive()) {
 		UpdateCombatCollisions();
 		if (endType_ == EndType::kNone && !IsBossPhaseSequenceActive()) { ResolveBossBodyCollision(); }
@@ -259,9 +268,7 @@ void GameScene::UpdateBossPhaseSequence() {
 		bossArmature_->EndPhaseTransition();
 		bossPhaseState_ = BossPhaseState::kPhaseTwo;
 		bossPhaseTimer_ = 0.0f;
-		// Phase 2 currently resumes the Phase 1 AI. Its new move set will be
-		// selected here once those moves are authored.
-		bossArmature_->SetAIEnabled(true);
+		bossArmature_->StartPhaseTwoAI();
 	}
 }
 
@@ -284,7 +291,7 @@ void GameScene::UpdateCombatCollisions() {
 		if (Overlaps(attack.min, attack.max, bossBody.min, bossBody.max)) {
 			playerAttackHitBoss_ = true;
 			bossHealth_ = (std::max)(0, bossHealth_ - kPlayerAttackDamage);
-			bossHealthRatio_ = static_cast<float>(bossHealth_) / static_cast<float>(kBossMaximumHealth);
+			bossHealthRatio_ = static_cast<float>(bossHealth_) / static_cast<float>(bossMaximumHealth_);
 			if (bossHealth_ <= 0) {
 				StartBossDefeat();
 				return;
@@ -295,28 +302,77 @@ void GameScene::UpdateCombatCollisions() {
 			}
 		}
 	}
+	// Animation Debug is for safely repeating and inspecting boss attacks.
+	// Keep player attacks available, but ignore every boss damage/pull response.
+	if (bossArmature_->IsAnimationDebugMode()) { return; }
+
+	const Player::AttackHitbox playerBody = player_->GetBodyHitbox();
+	const bool hookActive = bossArmature_->IsVerticalHookAttackActive();
+	if (!hookActive) {
+		hookPullApplied_ = false;
+	} else if (!hookPullApplied_ && !player_->IsDashInvincible()) {
+		const BossArmature::CollisionBox hook = bossArmature_->GetScytheHitbox();
+		if (Overlaps(playerBody.min, playerBody.max, hook.min, hook.max)) {
+			hookPullApplied_ = true;
+			const float playerHalfWidth = (playerBody.max.x - playerBody.min.x) * 0.5f;
+			const float playerCenterX = (playerBody.min.x + playerBody.max.x) * 0.5f;
+			const float bossCenterX = (bossBody.min.x + bossBody.max.x) * 0.5f;
+			const float pullTargetX = playerCenterX < bossCenterX
+			                              ? bossBody.min.x - playerHalfWidth - kHookPullStopPadding
+			                              : bossBody.max.x + playerHalfWidth + kHookPullStopPadding;
+			player_->StartPullToward(
+			    pullTargetX, kHookPullMaximumDistance,
+			    kHookPullDuration, kHookPullLiftAmount);
+		}
+	}
 
 	if (damageInvincibilityTimer_ > 0.0f || player_->IsDashInvincible()) { return; }
-	const Player::AttackHitbox playerBody = player_->GetBodyHitbox();
-	const bool scytheHit = bossArmature_->IsScytheAttackActive() && [&]() {
+	const bool jumpSlamActive = bossArmature_->IsJumpSlamImpactActive();
+	const Vector3 slamMinimum = {kBossArenaPlayerMinX, kBossSlamGroundMinimumY, -2.0f};
+	const Vector3 slamMaximum = {kMapWidth, kBossSlamGroundMaximumY, 2.0f};
+	const bool jumpSlamHit = jumpSlamActive && Overlaps(playerBody.min, playerBody.max, slamMinimum, slamMaximum);
+	bool groundWaveHit = false;
+	for (std::size_t index = 0; index < BossArmature::kGroundWaveCount; ++index) {
+		BossArmature::CollisionBox groundWave = {};
+		if (bossArmature_->GetGroundWaveHitbox(index, groundWave) &&
+		    Overlaps(playerBody.min, playerBody.max, groundWave.min, groundWave.max)) {
+			groundWaveHit = true;
+			break;
+		}
+	}
+	bool shadowPillarHit = false;
+	for (std::size_t index = 0; index < BossArmature::kShadowPillarCount; ++index) {
+		BossArmature::CollisionBox pillar = {};
+		float telegraphProgress = 0.0f;
+		bool damaging = false;
+		if (bossArmature_->GetShadowPillarState(index, pillar, telegraphProgress, damaging) && damaging &&
+		    Overlaps(playerBody.min, playerBody.max, pillar.min, pillar.max)) {
+			shadowPillarHit = true;
+			break;
+		}
+	}
+	const bool weaponHit = bossArmature_->IsScytheAttackActive() && !hookActive && !jumpSlamActive && [&]() {
 		const BossArmature::CollisionBox scythe = bossArmature_->GetScytheHitbox();
 		return Overlaps(playerBody.min, playerBody.max, scythe.min, scythe.max);
 	}();
 	const bool bodyHit = bossArmature_->IsBodyAttackActive() && Overlaps(playerBody.min, playerBody.max, bossBody.min, bossBody.max);
-	if (!scytheHit && !bodyHit) { return; }
+	if (!jumpSlamHit && !groundWaveHit && !shadowPillarHit && !weaponHit && !bodyHit) { return; }
 
-	playerHealth_ = (std::max)(0, playerHealth_ - (scytheHit ? kScytheDamage : kBossBodyDamage));
-	playerHealthRatio_ = static_cast<float>(playerHealth_) / static_cast<float>(kPlayerMaximumHealth);
+	const int damage = jumpSlamHit ? kJumpSlamDamage
+	                   : groundWaveHit ? kPhaseTwoGroundWaveDamage
+	                   : shadowPillarHit ? kPhaseTwoPillarDamage
+	                   : weaponHit ? kScytheDamage
+	                               : kBossBodyDamage;
+	playerHealth_ = (std::max)(0, playerHealth_ - damage);
+	playerHealthRatio_ = static_cast<float>(playerHealth_) / static_cast<float>(playerMaximumHealth_);
 	damageInvincibilityTimer_ = kDamageInvincibilityDuration;
 	player_->NotifyDamage();
 	cameraController_->StartShake(kPlayerHitShakeDuration, kPlayerHitShakeIntensity);
-	if (scytheHit && bossArmature_->IsVerticalHookAttackActive()) {
-		player_->StartPullToward(bossArmature_->GetPosition().x, kHookPullDistance, kHookPullDuration);
-	}
 	if (playerHealth_ <= 0) { StartPlayerDefeat(); }
 }
 
 void GameScene::ResolveBossBodyCollision() {
+	if (player_->IsDashing() || player_->IsBeingPulled() || bossArmature_->IsJumpRetreating()) { return; }
 	const Player::AttackHitbox playerBody = player_->GetBodyHitbox();
 	const BossArmature::CollisionBox bossBody = bossArmature_->GetBodyHitbox();
 	if (!Overlaps(playerBody.min, playerBody.max, bossBody.min, bossBody.max)) { return; }
@@ -380,7 +436,8 @@ void GameScene::UpdateEndSequence() {
 	// request is remembered until the logo finishes fading in, so a key press
 	// during the transition is never lost.
 	if (endPhase_ == EndPhase::kFadeToBlack || endPhase_ == EndPhase::kLogoFadeIn || endPhase_ == EndPhase::kLogoWait) {
-		if (Input::GetInstance()->TriggerKey(DIK_SPACE) || Input::GetInstance()->TriggerKey(DIK_RETURN)) {
+		if (Input::GetInstance()->TriggerKey(DIK_SPACE) || Input::GetInstance()->TriggerKey(DIK_RETURN) ||
+		    GamepadInput::IsTriggered(GamepadInput::ReadPlayerOne(), XINPUT_GAMEPAD_A)) {
 			resultContinueRequested_ = true;
 		}
 	}
@@ -629,9 +686,112 @@ void GameScene::DrawCollisionDebug(const Camera& camera) const {
 		const BossArmature::CollisionBox weapon = bossArmature_->GetScytheHitbox();
 		drawBox(weapon.min, weapon.max, {1.0f, 0.15f, 0.05f, 1.0f});
 	}
+	if (bossArmature_->IsJumpSlamImpactActive()) {
+		drawBox(
+		    {kBossArenaPlayerMinX, kBossSlamGroundMinimumY, -2.0f},
+		    {kMapWidth, kBossSlamGroundMaximumY, 2.0f},
+		    {1.0f, 0.45f, 0.05f, 1.0f});
+	}
 	if (player_->IsAttackActive()) {
 		const Player::AttackHitbox attack = player_->GetAttackHitbox();
 		drawBox(attack.min, attack.max, {0.20f, 0.65f, 1.0f, 1.0f});
+	}
+}
+
+void GameScene::DrawPhaseTwoAttackEffects(const Camera& camera) {
+	if (!bossAIStarted_ || endType_ != EndType::kNone) { return; }
+	std::array<BossArmature::CollisionBox, BossArmature::kGroundWaveCount> waveBoxes = {};
+	std::array<bool, BossArmature::kGroundWaveCount> waveVisible = {};
+	std::array<BossArmature::CollisionBox, BossArmature::kShadowPillarCount> pillarBoxes = {};
+	std::array<float, BossArmature::kShadowPillarCount> pillarTelegraphProgress = {};
+	std::array<bool, BossArmature::kShadowPillarCount> pillarVisible = {};
+	std::array<bool, BossArmature::kShadowPillarCount> pillarDamaging = {};
+	bool hasVisibleAttackModel = false;
+	for (std::size_t index = 0; index < BossArmature::kGroundWaveCount; ++index) {
+		waveVisible[index] = bossArmature_->GetGroundWaveHitbox(index, waveBoxes[index]);
+		hasVisibleAttackModel = hasVisibleAttackModel || waveVisible[index];
+	}
+	for (std::size_t index = 0; index < BossArmature::kShadowPillarCount; ++index) {
+		pillarVisible[index] = bossArmature_->GetShadowPillarState(
+		    index, pillarBoxes[index], pillarTelegraphProgress[index], pillarDamaging[index]);
+		hasVisibleAttackModel = hasVisibleAttackModel || (pillarVisible[index] && pillarDamaging[index]);
+	}
+
+	if ((bossAttackModel_ != nullptr || bossAttackWaveModel_ != nullptr) && hasVisibleAttackModel) {
+		Model::PreDraw(Model::CullingMode::kNone);
+		for (std::size_t index = 0; index < BossArmature::kGroundWaveCount; ++index) {
+			if (!waveVisible[index] || bossAttackWaveModel_ == nullptr) { continue; }
+			const BossArmature::CollisionBox& wave = waveBoxes[index];
+			const float halfWidth = (wave.max.x - wave.min.x) * 0.5f;
+			const float halfDepth = (wave.max.z - wave.min.z) * 0.5f;
+			// Hide the lower/rear seam below the floor, as with the pillars.
+			constexpr float kWaveBuriedDepth = 0.35f;
+			const float visualBottom = wave.min.y - kWaveBuriedDepth;
+			const float visualHeight = wave.max.y - visualBottom;
+			WorldTransform& transform = groundWaveTransforms_[index];
+			transform.scale_ = {halfWidth, visualHeight, halfDepth};
+			// The dedicated mesh is a real triangular prism with its base at local Y=0.
+			// It no longer needs a changing rotation, so its lean cannot flip in flight.
+			transform.rotation_ = {};
+			transform.translation_ = {
+			    (wave.min.x + wave.max.x) * 0.5f,
+			    visualBottom,
+			    (wave.min.z + wave.max.z) * 0.5f};
+			transform.matWorld_ = Matrix4x4Calculation::MakeAffineMatrix(
+			    transform.scale_, transform.rotation_, transform.translation_);
+			transform.TransferMatrix();
+			bossAttackWaveModel_->Draw(transform, camera);
+		}
+		for (std::size_t index = 0; index < BossArmature::kShadowPillarCount; ++index) {
+			if (!pillarVisible[index] || !pillarDamaging[index] || bossAttackModel_ == nullptr) { continue; }
+			const BossArmature::CollisionBox& pillar = pillarBoxes[index];
+			const float height = pillar.max.y - pillar.min.y;
+			if (height <= 0.01f) { continue; }
+			// Keep the visual buried below the floor while it rises. This prevents
+			// an exposed gap at the left/right screen edges where the floor cannot
+			// visually cover the model's bottom face from the camera angle.
+			constexpr float kPillarBuriedDepth = 1.25f;
+			const float visualBottom = pillar.min.y - kPillarBuriedDepth;
+			const float visualHeight = pillar.max.y - visualBottom;
+			WorldTransform& transform = shadowPillarTransforms_[index];
+			transform.scale_ = {
+			    (pillar.max.x - pillar.min.x) * 0.5f,
+			    visualHeight * 0.5f,
+			    (pillar.max.z - pillar.min.z) * 0.5f};
+			transform.rotation_ = {};
+			transform.translation_ = {
+			    (pillar.min.x + pillar.max.x) * 0.5f,
+			    visualBottom + visualHeight * 0.5f,
+			    (pillar.min.z + pillar.max.z) * 0.5f};
+			transform.matWorld_ = Matrix4x4Calculation::MakeAffineMatrix(
+			    transform.scale_, transform.rotation_, transform.translation_);
+			transform.TransferMatrix();
+			bossAttackModel_->Draw(transform, camera);
+		}
+		Model::PostDraw();
+	}
+
+	// A solid-looking white ground bar is the gameplay telegraph for an incoming
+	// pillar. Several tightly stacked lines form a readable rectangle while
+	// retaining the engine's lightweight primitive renderer.
+	PrimitiveDrawer* drawer = PrimitiveDrawer::GetInstance();
+	drawer->SetCamera(&camera);
+	for (std::size_t index = 0; index < BossArmature::kShadowPillarCount; ++index) {
+		if (!pillarVisible[index] || pillarDamaging[index]) { continue; }
+		const BossArmature::CollisionBox& pillar = pillarBoxes[index];
+		const float centerX = (pillar.min.x + pillar.max.x) * 0.5f;
+		const float warningHalfWidth =
+		    0.18f + (pillar.max.x - centerX) * pillarTelegraphProgress[index];
+		constexpr int kWarningBarRows = 9;
+		constexpr float kWarningBarHeight = 0.16f;
+		for (int row = 0; row < kWarningBarRows; ++row) {
+			const float rowProgress = static_cast<float>(row) / static_cast<float>(kWarningBarRows - 1);
+			const float y = pillar.min.y + 0.025f + rowProgress * kWarningBarHeight;
+			drawer->DrawLine3d(
+			    {centerX - warningHalfWidth, y, 0.17f},
+			    {centerX + warningHalfWidth, y, 0.17f},
+			    {1.0f, 1.0f, 1.0f, 1.0f});
+		}
 	}
 }
 
@@ -658,13 +818,29 @@ void GameScene::DrawEndOverlay() const {
 #ifdef USE_IMGUI
 void GameScene::DrawCombatImGui() {
 	ImGui::SetNextWindowPos(ImVec2(930.0f, 20.0f), ImGuiCond_Always);
-	ImGui::SetNextWindowSize(ImVec2(330.0f, 275.0f), ImGuiCond_Always);
+	ImGui::SetNextWindowSize(ImVec2(350.0f, 340.0f), ImGuiCond_Always);
 	ImGui::Begin("Combat Debug");
 	ImGui::Checkbox("Show boss AI ranges", &showBossRangeVisual_);
 	ImGui::Checkbox("Show collision boxes", &showCollisionDebug_);
-	ImGui::Text("Player health: %d / %d", playerHealth_, kPlayerMaximumHealth);
-	ImGui::Text("Boss health: %d / %d", bossHealth_, kBossMaximumHealth);
-	ImGui::Text("Damage: Player %d | Body %d | Scythe %d", kPlayerAttackDamage, kBossBodyDamage, kScytheDamage);
+	ImGui::Text("Player health: %d / %d", playerHealth_, playerMaximumHealth_);
+	ImGui::Text("Boss health: %d / %d", bossHealth_, bossMaximumHealth_);
+	if (ImGui::CollapsingHeader("Health Tuning", ImGuiTreeNodeFlags_DefaultOpen)) {
+		int playerMaximum = playerMaximumHealth_;
+		int bossMaximum = bossMaximumHealth_;
+		if (ImGui::DragInt("Player max HP / hits", &playerMaximum, 1.0f, 1, 100)) {
+			playerMaximumHealth_ = std::clamp(playerMaximum, 1, 100);
+			playerHealth_ = playerMaximumHealth_;
+			playerHealthRatio_ = 1.0f;
+		}
+		if (ImGui::DragInt("Boss max HP / hits", &bossMaximum, 1.0f, 1, 200)) {
+			bossMaximumHealth_ = std::clamp(bossMaximum, 1, 200);
+			bossHealth_ = bossMaximumHealth_;
+			bossHealthRatio_ = 1.0f;
+		}
+		ImGui::TextUnformatted("Changing max HP refills that health bar.");
+	}
+	ImGui::Text("Damage: Player %d | Body %d | Weapon %d", kPlayerAttackDamage, kBossBodyDamage, kScytheDamage);
+	ImGui::Text("Phase 2: Wave %d | Pillar %d", kPhaseTwoGroundWaveDamage, kPhaseTwoPillarDamage);
 	if (ImGui::SliderFloat("Dialogue box opacity", &dialogueBoxOpacity_, 0.0f, 1.0f, "%.2f")) {
 		dialogueSystem_->SetOpacity(dialogueBoxOpacity_);
 		phaseDialogueSystem_->SetOpacity(dialogueBoxOpacity_);
@@ -678,8 +854,8 @@ void GameScene::DrawCombatImGui() {
 	if (bossPhaseState_ == BossPhaseState::kPhaseTwo) { phaseName = "Phase 2"; }
 	ImGui::Text("Boss phase: %s", phaseName);
 	if (bossAIStarted_ && bossPhaseState_ == BossPhaseState::kPhaseOne && ImGui::Button("Test Phase 2 Transition")) {
-		bossHealth_ = (std::min)(bossHealth_, static_cast<int>(static_cast<float>(kBossMaximumHealth) * kBossPhaseTwoHealthRatio));
-		bossHealthRatio_ = static_cast<float>(bossHealth_) / static_cast<float>(kBossMaximumHealth);
+		bossHealth_ = (std::min)(bossHealth_, static_cast<int>(static_cast<float>(bossMaximumHealth_) * kBossPhaseTwoHealthRatio));
+		bossHealthRatio_ = static_cast<float>(bossHealth_) / static_cast<float>(bossMaximumHealth_);
 		StartBossPhaseDialogue();
 	}
 	if (ImGui::Button("Instant Player Lose")) { StartPlayerDefeat(); }
@@ -766,7 +942,8 @@ void GameScene::UpdateTitle() {
 	}
 	case FlowState::kTitle:
 		updateIdleMovement();
-		if (Input::GetInstance()->TriggerKey(DIK_SPACE)) {
+		if (Input::GetInstance()->TriggerKey(DIK_SPACE) ||
+		    GamepadInput::IsTriggered(GamepadInput::ReadPlayerOne(), XINPUT_GAMEPAD_A)) {
 			flowState_ = FlowState::kTitleFadeOut;
 			titleFadeTimer_ = 0.0f;
 		}
@@ -880,9 +1057,11 @@ void GameScene::Draw() {
 	player_->Draw(camera);
 	if (flowState_ == FlowState::kPlay) { bossArmature_->Draw(camera); }
 	Model::PostDraw();
+	if (flowState_ == FlowState::kPlay && endType_ == EndType::kNone) { player_->DrawDashCooldownMeter(camera); }
 	DrawBossDefeatParticles(camera);
 	if (flowState_ == FlowState::kPlay) { DrawBossRangeVisual(); }
 	if (flowState_ == FlowState::kPlay) { bossArmature_->DrawDebug(camera); }
+	if (flowState_ == FlowState::kPlay) { DrawPhaseTwoAttackEffects(camera); }
 	if (flowState_ == FlowState::kPlay) { DrawCollisionDebug(camera); }
 	if (flowState_ == FlowState::kPlay) { DrawHealthBars(); }
 	if (flowState_ == FlowState::kPlay && dialogueSystem_ != nullptr) { dialogueSystem_->Draw(); }
@@ -916,6 +1095,8 @@ GameScene::~GameScene() {
 	delete titleLogo_;
 	delete titleCoverSprite_;
 	delete introSprite_;
+	delete bossAttackWaveModel_;
+	delete bossAttackModel_;
 	delete defeatParticleModel_;
 	delete victoryDialogueSystem_;
 	delete phaseDialogueSystem_;

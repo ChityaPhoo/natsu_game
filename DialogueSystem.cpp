@@ -1,4 +1,5 @@
 #include "DialogueSystem.h"
+#include "GamepadInput.h"
 #include <algorithm>
 
 using namespace KamataEngine;
@@ -69,7 +70,8 @@ void DialogueSystem::Update() {
 		break;
 	}
 	case Phase::kWaiting:
-		if (Input::GetInstance()->TriggerKey(DIK_SPACE) || Input::GetInstance()->IsTriggerMouse(0)) {
+		if (Input::GetInstance()->TriggerKey(DIK_SPACE) || Input::GetInstance()->IsTriggerMouse(0) ||
+		    GamepadInput::IsTriggered(GamepadInput::ReadPlayerOne(), XINPUT_GAMEPAD_A)) {
 			phase_ = Phase::kDisappearing;
 			phaseTimer_ = 0.0f;
 		}

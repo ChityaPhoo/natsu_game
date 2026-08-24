@@ -14,7 +14,7 @@ public:
 	void Initialize();
 	void SetPosition(const KamataEngine::Vector3& position);
 	void ResolveHorizontalPush(float positionX);
-	void StartPullToward(float targetX, float maximumDistance, float duration);
+	void StartPullToward(float targetX, float maximumDistance, float duration, float liftAmount = 0.0f);
 	void NotifyDamage();
 	void SetMapChipField(MapChipField* mapChipField) { mapChipField_ = mapChipField; }
 	void SetLeftBoundary(float boundary) { leftBoundary_ = boundary; hasLeftBoundary_ = true; }
@@ -22,10 +22,13 @@ public:
 	void UpdateIdleAnimation();
 	void Update();
 	void Draw(const KamataEngine::Camera& camera);
+	void DrawDashCooldownMeter(const KamataEngine::Camera& camera) const;
 	const KamataEngine::WorldTransform& GetWorldTransform() const { return worldTransform_; }
 	const KamataEngine::Vector3& GetVelocity() const { return velocity_; }
 	bool IsAttackActive() const;
 	bool IsDashInvincible() const;
+	bool IsDashing() const { return actionState_ == ActionState::kDash; }
+	bool IsBeingPulled() const { return pullActive_; }
 	bool IsFacingRight() const { return currentDirection_ == LRDirection::kRight; }
 	AttackHitbox GetBodyHitbox() const;
 	AttackHitbox GetAttackHitbox() const;
@@ -52,7 +55,7 @@ private:
 	static float EaseOut(float start, float end, float t);
 
 	static inline const float kAcceleration = 0.04f;
-	static inline const float kMaxSpeed = 0.30f;
+	static inline const float kMaxSpeed = 0.25f;
 	static inline const float kAttenuation = 0.20f;
 	static inline const float kJumpAcceleration = 0.45f;
 	static inline const float kGravityAcceleration = 0.03f;
@@ -75,12 +78,14 @@ private:
 	static inline const float kMapMaxCenterX = 99.55f;
 	static inline const float kFrameTime = 1.0f / 60.0f;
 	static inline const float kDashChargeTime = 0.10f;
-	static inline const float kDashBurstTime = 0.12f;
+	static inline const float kDashBurstTime = 0.15f;
 	static inline const float kDashRecoveryTime = 0.18f;
-	static inline const float kDashBurstSpeed = 0.70f;
-	static inline const float kDashBurstEndSpeed = 0.38f;
+	static inline const float kDashBurstSpeed = 0.86f;
+	static inline const float kDashBurstEndSpeed = 0.48f;
 	static inline const float kDashCooldown = 0.85f;
 	static inline const float kDashInvincibilityDuration = kDashChargeTime + kDashBurstTime;
+	static inline const float kDashMeterWidth = 1.10f;
+	static inline const float kDashMeterHeightOffset = 1.05f;
 	static inline const float kDamageBlinkDuration = 0.75f;
 	static inline const float kDamageBlinkInterval = 0.075f;
 	static inline const float kAttackChargeTime = 0.10f;
@@ -108,6 +113,7 @@ private:
 	DashPhase dashPhase_ = DashPhase::kCharge;
 	AttackPhase attackPhase_ = AttackPhase::kCharge;
 	bool onGround_ = false;
+	uint32_t jumpsRemaining_ = 2;
 	bool canAirDash_ = true;
 	bool canAirAttack_ = true;
 	bool isAttackEffectVisible_ = false;
@@ -118,6 +124,8 @@ private:
 	float damageBlinkTimer_ = 0.0f;
 	float pullStartX_ = 0.0f;
 	float pullTargetX_ = 0.0f;
+	float pullStartY_ = 0.0f;
+	float pullLiftAmount_ = 0.0f;
 	float pullTimer_ = 0.0f;
 	float pullDuration_ = 0.0f;
 	float idleAnimationTimer_ = 0.0f;

@@ -16,6 +16,8 @@ public:
 	void Initialize();
 	void Update(const KamataEngine::Vector3& playerPosition);
 	void SetAIEnabled(bool enabled);
+	void SetPhaseTwo(bool enabled) { isPhaseTwo_ = enabled; }
+	void StartPhaseTwoAI();
 	void SetHorizontalBounds(float minX, float maxX);
 	void SetVisible(bool visible) { isVisible_ = visible; }
 	void SetDefeatBrightness(float brightness);
@@ -27,12 +29,22 @@ public:
 	bool IsScytheAttackActive() const;
 	bool IsBodyAttackActive() const;
 	bool IsVerticalHookAttackActive() const;
+	bool IsJumpSlamImpactActive() const;
+	bool IsJumpRetreating() const { return aiState_ == AIState::kRetreat; }
+	static inline constexpr std::size_t kGroundWaveCount = 3;
+	bool GetGroundWaveHitbox(std::size_t index, CollisionBox& hitbox) const;
+	static inline constexpr std::size_t kShadowPillarCount = 14;
+	bool GetShadowPillarState(
+	    std::size_t index, CollisionBox& hitbox, float& telegraphProgress,
+	    bool& damaging) const;
+	bool ConsumeSlamImpact();
 	KamataEngine::Vector3 GetPosition() const { return joints_[kRoot].worldPosition; }
 	float GetCloseDistance() const { return closeDistance_; }
 	float GetMidDistance() const { return midDistance_; }
 	bool IsEditorCameraActive() const {
 		return controlMode_ == ControlMode::kPoseEditor || controlMode_ == ControlMode::kKeyframeEditor;
 	}
+	bool IsAnimationDebugMode() const { return controlMode_ == ControlMode::kAnimationDebug; }
 	void Draw(const KamataEngine::Camera& camera);
 	void DrawDebug(const KamataEngine::Camera& camera);
 #ifdef USE_IMGUI
@@ -61,6 +73,10 @@ private:
 		kScytheThrow,
 		kSpinAttack,
 		kVerticalHook,
+		kJumpSlam,
+		kPhaseTwoUppercut,
+		kPhaseTwoGroundWave,
+		kPhaseTwoPillars,
 	};
 
 	enum class ControlMode {
@@ -77,6 +93,10 @@ private:
 		kSpinAttack,
 		kVerticalHook,
 		kScytheThrow,
+		kJumpSlam,
+		kPhaseTwoUppercut,
+		kPhaseTwoGroundWave,
+		kPhaseTwoPillars,
 	};
 
 	struct Joint {
@@ -151,6 +171,11 @@ private:
 	void InitializeScytheThrowClip();
 	void InitializeSpinAttackClip();
 	void InitializeVerticalHookClip();
+	void InitializeJumpSlamClip();
+	void InitializePhaseTwoUppercutClip();
+	void InitializePhaseTwoGroundWaveClip();
+	void InitializePhaseTwoPillarsClip();
+	void UpdatePhaseTwoAttackState();
 	void StartAnimation(AnimationType animation);
 	void StopAnimation();
 	void FreezeCurrentPoseForEditing();
@@ -196,6 +221,10 @@ private:
 	std::array<AttackKeyframe, 8> scytheThrowKeyframes_ = {};
 	std::array<AttackKeyframe, 8> spinAttackKeyframes_ = {};
 	std::array<AttackKeyframe, 6> verticalHookKeyframes_ = {};
+	std::array<AttackKeyframe, 6> jumpSlamKeyframes_ = {};
+	std::array<AttackKeyframe, 6> phaseTwoUppercutKeyframes_ = {};
+	std::array<AttackKeyframe, 6> phaseTwoGroundWaveKeyframes_ = {};
+	std::array<AttackKeyframe, 6> phaseTwoPillarsKeyframes_ = {};
 	std::array<ModelPart, 4> modelParts_;
 	KamataEngine::Model* weaponModel_ = nullptr;
 	KamataEngine::WorldTransform weaponTransform_;
@@ -213,6 +242,10 @@ private:
 	bool keyframePreviewPlaying_ = false;
 	bool aiEnabled_ = false;
 	bool phaseTransitionActive_ = false;
+	bool slamImpactPending_ = false;
+	bool isPhaseTwo_ = false;
+	std::array<float, kShadowPillarCount> shadowPillarTargetX_ = {};
+	std::array<bool, kShadowPillarCount> shadowPillarTargetLocked_ = {};
 	AnimationType activeAnimation_ = AnimationType::kNone;
 	AnimationType keyframeEditorAnimation_ = AnimationType::kNormalAttack;
 	std::size_t selectedKeyframeIndex_ = 0;
@@ -225,10 +258,12 @@ private:
 	KamataEngine::Vector3 scytheFlightDirection_ = {-1.0f, 0.0f, 0.0f};
 	KamataEngine::Vector3 explicitScytheCenter_ = {};
 	float explicitScytheRotation_ = 0.0f;
+	float scytheThrowFlightDistance_ = 0.0f;
 	float facingDirection_ = -1.0f;
 	float playerDistance_ = 0.0f;
 	float aiWaitTimer_ = 0.0f;
 	float retreatTimer_ = 0.0f;
+	float retreatTargetX_ = kInitialBossX;
 	int lastAIRoll_ = -1;
 	uint32_t randomState_ = 0x4D595DF4u;
 	float jointRadius_ = 0.10f;
@@ -254,13 +289,17 @@ private:
 	float bodyHitboxHalfDepth_ = 1.00f;
 	KamataEngine::Vector3 scytheHitboxPadding_ = {0.20f, 0.20f, 0.20f};
 	float weaponHitboxScale_ = 0.85f;
+	float throwHitboxHalfWidth_ = 1.25f;
+	float throwHitboxMinimumY_ = 1.80f;
+	float throwHitboxMaximumY_ = 6.20f;
+	float throwHitboxHalfDepth_ = 2.50f;
 	float normalAttackPlaybackSpeed_ = 1.8f;
 	float normalAttackPlaybackDuration_ = 2.20f;
 	float scytheThrowPlaybackSpeed_ = 1.0f;
 	float scytheThrowPlaybackDuration_ = 2.45f;
-	float scytheThrowRange_ = 14.0f;
+	float scytheThrowRange_ = 18.0f;
 	float scytheThrowArcHeight_ = 0.75f;
-	float scytheThrowTargetYOffset_ = 1.80f;
+	float scytheThrowTargetYOffset_ = 0.00f;
 	float scytheThrowSpinCount_ = 4.0f;
 	float spinAttackPlaybackSpeed_ = 3.0f;
 	float spinAttackPlaybackDuration_ = 5.00f;
@@ -269,18 +308,45 @@ private:
 	float verticalHookPlaybackDuration_ = 1.40f;
 	float verticalHookReach_ = 9.0f;
 	float verticalHookTargetYOffset_ = 1.80f;
-	float closeDistance_ = 4.5f;
+	float jumpSlamPlaybackSpeed_ = 1.0f;
+	float jumpSlamPlaybackDuration_ = 1.55f;
+	float jumpSlamMoveSpeed_ = 14.0f;
+	float jumpSlamStopDistance_ = 1.25f;
+	float closeDistance_ = 3.5f;
 	float midDistance_ = 10.0f;
 	float aiDecisionDelay_ = 0.65f;
-	float retreatSpeed_ = 2.0f;
-	float retreatDuration_ = 0.90f;
-	float spinDashSpeed_ = 2.2f;
-	float spinDashStopDistance_ = 1.8f;
+	float retreatSpeed_ = 12.0f;
+	float retreatDuration_ = 1.10f;
+	float retreatJumpHeight_ = 2.20f;
+	float spinDashSpeed_ = 6.0f;
+	float spinDashStopDistance_ = 1.2f;
 	float movementMinX_ = 3.0f;
 	float movementMaxX_ = 97.0f;
-	int closeMeleeChance_ = 65;
-	int midSpinChance_ = 55;
-	int farThrowChance_ = 100;
+	// Exact weighted move tables. The final move in each distance band receives
+	// the remaining percentage so every band always totals 100%.
+	int closeMeleeChance_ = 40;
+	int midHookChance_ = 30;
+	int midSpinChance_ = 40;
+	int farThrowChance_ = 40;
+	int phaseTwoCloseUppercutChance_ = 40;
+	int phaseTwoCloseMeleeChance_ = 30;
+	int phaseTwoMidGroundWaveChance_ = 30;
+	int phaseTwoMidSpinChance_ = 30;
+	int phaseTwoMidHookChance_ = 20;
+	int phaseTwoFarJumpSlamChance_ = 40;
+	int phaseTwoFarThrowChance_ = 30;
+	float phaseTwoUppercutDashSpeed_ = 11.0f;
+	float phaseTwoUppercutStopDistance_ = 0.75f;
+	float phaseTwoGroundWaveRange_ = 25.0f;
+	float phaseTwoGroundWaveHalfWidth_ = 2.0f;
+	float phaseTwoGroundWaveHeight_ = 3.20f;
+	float phaseTwoGroundWaveInterval_ = 3.00f;
+	float phaseTwoUppercutPlaybackSpeed_ = 1.0f;
+	float phaseTwoUppercutPlaybackDuration_ = 1.15f;
+	float phaseTwoGroundWavePlaybackSpeed_ = 2.0f;
+	float phaseTwoGroundWavePlaybackDuration_ = 9.00f;
+	float phaseTwoPillarsPlaybackSpeed_ = 1.0f;
+	float phaseTwoPillarsPlaybackDuration_ = 10.00f;
 	float animationTime_ = 0.0f;
 	static inline const float kFrameTime = 1.0f / 60.0f;
 	static inline const float kInitialBossX = 96.0f;
@@ -289,6 +355,19 @@ private:
 	static inline const float kScytheThrowDuration = 2.45f;
 	static inline const float kSpinAttackDuration = 1.95f;
 	static inline const float kVerticalHookDuration = 1.40f;
+	static inline const float kJumpSlamDuration = 1.55f;
+	static inline const float kJumpSlamLaunchTime = 0.28f;
+	static inline const float kJumpSlamImpactTime = 1.05f;
+	static inline const float kPhaseTwoUppercutDuration = 1.15f;
+	static inline const float kPhaseTwoGroundWaveDuration = 9.00f;
+	static inline const float kPhaseTwoGroundWaveImpactTime = 0.62f;
+	static inline const float kPhaseTwoGroundWaveTravelDuration = 2.20f;
+	static inline const float kPhaseTwoPillarsDuration = 10.00f;
+	static inline const float kShadowPillarFirstTelegraphTime = 1.00f;
+	static inline const float kShadowPillarInterval = 0.57f;
+	static inline const float kShadowPillarTelegraphDuration = 0.85f;
+	static inline const float kShadowPillarActiveDuration = 0.55f;
+	static inline const float kShadowPillarRiseDuration = 0.22f;
 	static inline const float kScytheReleaseTime = 0.62f;
 	static inline const float kScytheCatchTime = 1.88f;
 };

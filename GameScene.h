@@ -74,6 +74,7 @@ private:
 	void DrawEndOverlay() const;
 	void DrawBossRangeVisual();
 	void DrawCollisionDebug(const KamataEngine::Camera& camera) const;
+	void DrawPhaseTwoAttackEffects(const KamataEngine::Camera& camera);
 	static bool Overlaps(
 	    const KamataEngine::Vector3& minA,
 	    const KamataEngine::Vector3& maxA,
@@ -168,15 +169,26 @@ private:
 	// Combat tuning: maximum health and all currently implemented damage.
 	// =====================================================================
 	static inline const float kDamageInvincibilityDuration = 0.75f;
-	static inline const int kPlayerMaximumHealth = 100;
-	static inline const int kBossMaximumHealth = 100;
-	static inline const int kPlayerAttackDamage = 10;
-	static inline const int kBossBodyDamage = 8;
-	static inline const int kScytheDamage = 20;
+	static inline const int kDefaultPlayerMaximumHealth = 10;
+	static inline const int kDefaultBossMaximumHealth = 25;
+	// Health is measured in successful hits for now: every damaging attack
+	// removes one HP, so these defaults are exactly 10 and 25 hits to defeat.
+	static inline const int kPlayerAttackDamage = 1;
+	static inline const int kBossBodyDamage = 1;
+	static inline const int kScytheDamage = 1;
+	static inline const int kJumpSlamDamage = 1;
+	static inline const int kPhaseTwoGroundWaveDamage = 1;
+	static inline const int kPhaseTwoPillarDamage = 1;
 	static inline const float kPlayerHitShakeDuration = 0.22f;
 	static inline const float kPlayerHitShakeIntensity = 0.18f;
-	static inline const float kHookPullDistance = 2.40f;
-	static inline const float kHookPullDuration = 0.30f;
+	static inline const float kHookPullMaximumDistance = 6.00f;
+	static inline const float kHookPullDuration = 0.55f;
+	static inline const float kHookPullLiftAmount = 0.40f;
+	static inline const float kHookPullStopPadding = 0.20f;
+	static inline const float kBossSlamShakeDuration = 0.38f;
+	static inline const float kBossSlamShakeIntensity = 0.32f;
+	static inline const float kBossSlamGroundMinimumY = 2.00f;
+	static inline const float kBossSlamGroundMaximumY = 2.72f;
 
 	// Phase 2 begins when the boss reaches this fraction of maximum health.
 	// The temporary transition is: compress -> power surge -> settle.
@@ -213,8 +225,12 @@ private:
 	DialogueSystem* phaseDialogueSystem_ = nullptr;
 	DialogueSystem* victoryDialogueSystem_ = nullptr;
 	KamataEngine::Model* defeatParticleModel_ = nullptr;
+	KamataEngine::Model* bossAttackModel_ = nullptr;
+	KamataEngine::Model* bossAttackWaveModel_ = nullptr;
 	KamataEngine::ObjectColor defeatParticleColor_;
 	std::array<DefeatParticle, kBossDefeatParticleCount> defeatParticles_;
+	std::array<KamataEngine::WorldTransform, BossArmature::kGroundWaveCount> groundWaveTransforms_;
+	std::array<KamataEngine::WorldTransform, BossArmature::kShadowPillarCount> shadowPillarTransforms_;
 	KamataEngine::Sprite* introSprite_ = nullptr;
 	KamataEngine::Sprite* titleCoverSprite_ = nullptr;
 	KamataEngine::Sprite* titleLogo_ = nullptr;
@@ -254,10 +270,13 @@ private:
 	KamataEngine::Vector3 defeatCameraBase_ = {};
 	uint32_t effectRandomState_ = 0x9E3779B9u;
 	uint32_t slowMotionFrameCounter_ = 0;
-	int playerHealth_ = kPlayerMaximumHealth;
-	int bossHealth_ = kBossMaximumHealth;
+	int playerMaximumHealth_ = kDefaultPlayerMaximumHealth;
+	int bossMaximumHealth_ = kDefaultBossMaximumHealth;
+	int playerHealth_ = kDefaultPlayerMaximumHealth;
+	int bossHealth_ = kDefaultBossMaximumHealth;
 	bool healthBarsVisible_ = false;
 	bool playerAttackHitBoss_ = false;
+	bool hookPullApplied_ = false;
 	bool showBossRangeVisual_ = false;
 	bool showCollisionDebug_ = false;
 	bool restartToTitleRequested_ = false;

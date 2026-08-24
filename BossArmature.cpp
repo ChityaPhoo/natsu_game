@@ -66,6 +66,10 @@ void BossArmature::Initialize() {
 	InitializeScytheThrowClip();
 	InitializeSpinAttackClip();
 	InitializeVerticalHookClip();
+	InitializeJumpSlamClip();
+	InitializePhaseTwoUppercutClip();
+	InitializePhaseTwoGroundWaveClip();
+	InitializePhaseTwoPillarsClip();
 
 	// The float_* resources are authored around their own local origins. Attach
 	// their useful pivots to the existing armature instead of treating their OBJ
@@ -198,6 +202,7 @@ void BossArmature::Update(const Vector3& playerPosition) {
 			LoadSelectedKeyframePose();
 		}
 	}
+	UpdatePhaseTwoAttackState();
 	for (uint32_t index = 0; index < kJointCount; ++index) {
 		Joint& joint = joints_[index];
 		joint.localMatrix = Matrix4x4Calculation::MakeAffineMatrix(joint.scale, joint.rotation, joint.translation);
@@ -456,6 +461,11 @@ void BossArmature::DrawImGui() {
 		ImGui::DragFloat("Body half depth", &bodyHitboxHalfDepth_, 0.02f, 0.10f, 5.0f);
 		ImGui::DragFloat3("Weapon hitbox padding", &scytheHitboxPadding_.x, 0.02f, 0.0f, 4.0f);
 		ImGui::DragFloat("Weapon hitbox scale", &weaponHitboxScale_, 0.01f, 0.20f, 1.25f);
+		ImGui::DragFloat("Throw hitbox half width", &throwHitboxHalfWidth_, 0.02f, 0.10f, 4.0f);
+		ImGui::DragFloat("Throw hitbox minimum Y", &throwHitboxMinimumY_, 0.02f, 0.0f, 8.0f);
+		ImGui::DragFloat("Throw hitbox maximum Y", &throwHitboxMaximumY_, 0.02f, 0.0f, 12.0f);
+		throwHitboxMaximumY_ = (std::max)(throwHitboxMaximumY_, throwHitboxMinimumY_ + 0.10f);
+		ImGui::DragFloat("Throw hitbox half depth", &throwHitboxHalfDepth_, 0.02f, 0.10f, 5.0f);
 	}
 
 	ImGui::SeparatorText("Control Mode");
@@ -492,35 +502,89 @@ void BossArmature::DrawImGui() {
 			closeDistance_ = std::clamp(closeDistance_, 1.0f, 19.5f);
 			midDistance_ = std::clamp(midDistance_, closeDistance_ + 0.5f, 30.0f);
 			ImGui::DragFloat("Decision delay", &aiDecisionDelay_, 0.05f, 0.0f, 3.0f, "%.2f sec");
-			ImGui::DragFloat("Retreat speed", &retreatSpeed_, 0.10f, 0.1f, 8.0f);
+			ImGui::DragFloat("Retreat speed", &retreatSpeed_, 0.10f, 0.1f, 18.0f);
 			ImGui::DragFloat("Retreat duration", &retreatDuration_, 0.05f, 0.1f, 3.0f, "%.2f sec");
+			ImGui::DragFloat("Retreat jump height", &retreatJumpHeight_, 0.05f, 0.0f, 6.0f);
 			ImGui::DragFloat("Spin dash speed", &spinDashSpeed_, 0.10f, 0.0f, 8.0f);
 			ImGui::DragFloat("Spin stop distance", &spinDashStopDistance_, 0.10f, 0.5f, 5.0f);
+			ImGui::DragFloat("Jump slam move speed", &jumpSlamMoveSpeed_, 0.10f, 1.0f, 30.0f);
+			ImGui::DragFloat("Jump slam stop distance", &jumpSlamStopDistance_, 0.10f, 0.25f, 5.0f);
+			ImGui::DragFloat("Phase 2 uppercut dash speed", &phaseTwoUppercutDashSpeed_, 0.10f, 1.0f, 30.0f);
+			ImGui::DragFloat("Phase 2 uppercut stop distance", &phaseTwoUppercutStopDistance_, 0.10f, 0.25f, 4.0f);
 		}
 
 		if (ImGui::CollapsingHeader("AI Move Chances", ImGuiTreeNodeFlags_DefaultOpen)) {
+			ImGui::SeparatorText("Phase 1");
 			ImGui::Text("Close (distance < %.1f)", closeDistance_);
-			ImGui::SliderInt("Close Melee", &closeMeleeChance_, 0, 100, "%d%%");
-			ImGui::Text("Close Retreat (auto): %d%%", 100 - closeMeleeChance_);
+			ImGui::SliderInt("Melee##P1Close", &closeMeleeChance_, 0, 100, "%d%%");
+			ImGui::Text("Jump Retreat: %d%%", 100 - closeMeleeChance_);
 			ImGui::Separator();
 			ImGui::Text("Mid (%.1f - %.1f)", closeDistance_, midDistance_);
-			ImGui::SliderInt("Mid Spin Attack", &midSpinChance_, 0, 100, "%d%%");
-			ImGui::Text("Mid Vertical Hook (auto): %d%%", 100 - midSpinChance_);
+			ImGui::SliderInt("Hook##P1Mid", &midHookChance_, 0, 100, "%d%%");
+			midSpinChance_ = std::clamp(midSpinChance_, 0, 100 - midHookChance_);
+			ImGui::SliderInt("Spin##P1Mid", &midSpinChance_, 0, 100 - midHookChance_, "%d%%");
+			ImGui::Text("Jump Retreat: %d%%", 100 - midHookChance_ - midSpinChance_);
 			ImGui::Separator();
 			ImGui::Text("Far (distance >= %.1f)", midDistance_);
-			ImGui::SliderInt("Far Scythe Throw", &farThrowChance_, 0, 100, "%d%%");
-			ImGui::Text("Far Wait (auto): %d%%", 100 - farThrowChance_);
+			ImGui::SliderInt("Throw##P1Far", &farThrowChance_, 0, 100, "%d%%");
+			ImGui::Text("Jump Slam: %d%%", 100 - farThrowChance_);
+
+			ImGui::SeparatorText("Phase 2");
+			ImGui::Text("Close (distance < %.1f)", closeDistance_);
+			ImGui::SliderInt("Uppercut##P2Close", &phaseTwoCloseUppercutChance_, 0, 100, "%d%%");
+			phaseTwoCloseMeleeChance_ = std::clamp(
+			    phaseTwoCloseMeleeChance_, 0, 100 - phaseTwoCloseUppercutChance_);
+			ImGui::SliderInt(
+			    "Melee##P2Close", &phaseTwoCloseMeleeChance_, 0,
+			    100 - phaseTwoCloseUppercutChance_, "%d%%");
+			ImGui::Text(
+			    "Jump Retreat: %d%%",
+			    100 - phaseTwoCloseUppercutChance_ - phaseTwoCloseMeleeChance_);
+
+			ImGui::Text("Mid (%.1f - %.1f)", closeDistance_, midDistance_);
+			ImGui::SliderInt("Ground Wave##P2Mid", &phaseTwoMidGroundWaveChance_, 0, 100, "%d%%");
+			phaseTwoMidSpinChance_ = std::clamp(
+			    phaseTwoMidSpinChance_, 0, 100 - phaseTwoMidGroundWaveChance_);
+			ImGui::SliderInt(
+			    "Spin##P2Mid", &phaseTwoMidSpinChance_, 0,
+			    100 - phaseTwoMidGroundWaveChance_, "%d%%");
+			phaseTwoMidHookChance_ = std::clamp(
+			    phaseTwoMidHookChance_, 0,
+			    100 - phaseTwoMidGroundWaveChance_ - phaseTwoMidSpinChance_);
+			ImGui::SliderInt(
+			    "Hook##P2Mid", &phaseTwoMidHookChance_, 0,
+			    100 - phaseTwoMidGroundWaveChance_ - phaseTwoMidSpinChance_, "%d%%");
+			ImGui::Text(
+			    "Jump Retreat: %d%%",
+			    100 - phaseTwoMidGroundWaveChance_ - phaseTwoMidSpinChance_ - phaseTwoMidHookChance_);
+
+			ImGui::Text("Far (distance >= %.1f)", midDistance_);
+			ImGui::SliderInt("Jump Slam##P2Far", &phaseTwoFarJumpSlamChance_, 0, 100, "%d%%");
+			phaseTwoFarThrowChance_ = std::clamp(
+			    phaseTwoFarThrowChance_, 0, 100 - phaseTwoFarJumpSlamChance_);
+			ImGui::SliderInt(
+			    "Throw##P2Far", &phaseTwoFarThrowChance_, 0,
+			    100 - phaseTwoFarJumpSlamChance_, "%d%%");
+			ImGui::Text(
+			    "Shadow Pillars: %d%%",
+			    100 - phaseTwoFarJumpSlamChance_ - phaseTwoFarThrowChance_);
 		}
 
 		if (ImGui::CollapsingHeader("Force AI Move")) {
 			if (ImGui::Button("Force Melee")) { EnterAIState(AIState::kMeleeAttack); }
 			ImGui::SameLine();
-			if (ImGui::Button("Force Retreat")) { EnterAIState(AIState::kRetreat); }
+			if (ImGui::Button("Force Jump Retreat")) { EnterAIState(AIState::kRetreat); }
 			if (ImGui::Button("Force Spin")) { EnterAIState(AIState::kSpinAttack); }
 			ImGui::SameLine();
 			if (ImGui::Button("Force Hook")) { EnterAIState(AIState::kVerticalHook); }
 			ImGui::SameLine();
 			if (ImGui::Button("Force Throw")) { EnterAIState(AIState::kScytheThrow); }
+			ImGui::SameLine();
+			if (ImGui::Button("Force Jump Slam")) { EnterAIState(AIState::kJumpSlam); }
+			if (ImGui::Button("Force P2 Uppercut")) { EnterAIState(AIState::kPhaseTwoUppercut); }
+			ImGui::SameLine();
+			if (ImGui::Button("Force P2 Ground Wave")) { EnterAIState(AIState::kPhaseTwoGroundWave); }
+			if (ImGui::Button("Force P2 Pillars")) { EnterAIState(AIState::kPhaseTwoPillars); }
 		}
 		if (ImGui::Button("Reset AI and boss position")) { ResetBossPosition(); }
 	} else if (controlMode_ == ControlMode::kAnimationDebug) {
@@ -546,20 +610,27 @@ void BossArmature::DrawImGui() {
 	if (controlMode_ == ControlMode::kKeyframeEditor) {
 		ImGui::SeparatorText("Editable Keyframes");
 		constexpr const char* kMoveNames[] = {
-		    "Normal Attack", "Scythe Throw", "Spin Attack", "Vertical Hook"};
+		    "Normal Attack", "Scythe Throw", "Spin Attack", "Vertical Hook", "Jump Slam",
+		    "P2 Dash Uppercut", "P2 Ground Wave", "P2 Shadow Pillars"};
 		int moveIndex = 0;
 		switch (keyframeEditorAnimation_) {
 		case AnimationType::kNormalAttack: moveIndex = 0; break;
 		case AnimationType::kScytheThrow: moveIndex = 1; break;
 		case AnimationType::kSpinAttack: moveIndex = 2; break;
 		case AnimationType::kVerticalHook: moveIndex = 3; break;
+		case AnimationType::kJumpSlam: moveIndex = 4; break;
+		case AnimationType::kPhaseTwoUppercut: moveIndex = 5; break;
+		case AnimationType::kPhaseTwoGroundWave: moveIndex = 6; break;
+		case AnimationType::kPhaseTwoPillars: moveIndex = 7; break;
 		case AnimationType::kNone: break;
 		}
 		ImGui::BeginDisabled(keyframePreviewPlaying_);
 		if (ImGui::Combo("Move", &moveIndex, kMoveNames, IM_ARRAYSIZE(kMoveNames))) {
 			constexpr AnimationType kMoveTypes[] = {
 			    AnimationType::kNormalAttack, AnimationType::kScytheThrow,
-			    AnimationType::kSpinAttack, AnimationType::kVerticalHook};
+			    AnimationType::kSpinAttack, AnimationType::kVerticalHook,
+			    AnimationType::kJumpSlam, AnimationType::kPhaseTwoUppercut,
+			    AnimationType::kPhaseTwoGroundWave, AnimationType::kPhaseTwoPillars};
 			keyframeEditorAnimation_ = kMoveTypes[moveIndex];
 			selectedKeyframeIndex_ = 0;
 			LoadSelectedKeyframePose();
@@ -593,6 +664,10 @@ void BossArmature::DrawImGui() {
 				case AnimationType::kScytheThrow: maximumTime = kScytheThrowDuration; break;
 				case AnimationType::kSpinAttack: maximumTime = kSpinAttackDuration; break;
 				case AnimationType::kVerticalHook: maximumTime = kVerticalHookDuration; break;
+				case AnimationType::kJumpSlam: maximumTime = kJumpSlamDuration; break;
+				case AnimationType::kPhaseTwoUppercut: maximumTime = kPhaseTwoUppercutDuration; break;
+				case AnimationType::kPhaseTwoGroundWave: maximumTime = kPhaseTwoGroundWaveDuration; break;
+				case AnimationType::kPhaseTwoPillars: maximumTime = kPhaseTwoPillarsDuration; break;
 				case AnimationType::kNone: break;
 				}
 			}
@@ -640,6 +715,30 @@ void BossArmature::DrawImGui() {
 		ImGui::DragFloat("Hook duration", &verticalHookPlaybackDuration_, 0.05f, 0.40f, 5.0f, "%.2f sec");
 		ImGui::DragFloat("Hook range", &verticalHookReach_, 0.10f, 4.0f, 14.0f);
 		ImGui::DragFloat("Hook target Y offset", &verticalHookTargetYOffset_, 0.05f, -2.0f, 5.0f);
+	}
+	if (ImGui::CollapsingHeader("Jump Slam", ImGuiTreeNodeFlags_DefaultOpen)) {
+		if (controlMode_ == ControlMode::kAnimationDebug && ImGui::Button("Play Jump Slam")) { StartAnimation(AnimationType::kJumpSlam); }
+		ImGui::DragFloat("Jump slam speed", &jumpSlamPlaybackSpeed_, 0.05f, 0.10f, 3.0f);
+		ImGui::DragFloat("Jump slam duration", &jumpSlamPlaybackDuration_, 0.05f, 0.50f, 5.0f, "%.2f sec");
+	}
+	if (ImGui::CollapsingHeader("Phase 2 Dash Uppercut", ImGuiTreeNodeFlags_DefaultOpen)) {
+		if (controlMode_ == ControlMode::kAnimationDebug && ImGui::Button("Play P2 Dash Uppercut")) { StartAnimation(AnimationType::kPhaseTwoUppercut); }
+		ImGui::DragFloat("P2 uppercut speed", &phaseTwoUppercutPlaybackSpeed_, 0.05f, 0.10f, 3.0f);
+		ImGui::DragFloat("P2 uppercut duration", &phaseTwoUppercutPlaybackDuration_, 0.05f, 0.40f, 4.0f, "%.2f sec");
+	}
+	if (ImGui::CollapsingHeader("Phase 2 Ground Wave", ImGuiTreeNodeFlags_DefaultOpen)) {
+		if (controlMode_ == ControlMode::kAnimationDebug && ImGui::Button("Play P2 Ground Wave")) { StartAnimation(AnimationType::kPhaseTwoGroundWave); }
+		ImGui::DragFloat("P2 wave speed", &phaseTwoGroundWavePlaybackSpeed_, 0.05f, 0.10f, 3.0f);
+		ImGui::DragFloat("P2 wave duration", &phaseTwoGroundWavePlaybackDuration_, 0.05f, 0.40f, 12.0f, "%.2f sec");
+		ImGui::DragFloat("P2 wave range", &phaseTwoGroundWaveRange_, 0.10f, 3.0f, 25.0f);
+		ImGui::DragFloat("P2 wave half width", &phaseTwoGroundWaveHalfWidth_, 0.05f, 0.25f, 2.0f);
+		ImGui::DragFloat("P2 wave height", &phaseTwoGroundWaveHeight_, 0.05f, 0.50f, 6.0f);
+		ImGui::DragFloat("Duration between waves", &phaseTwoGroundWaveInterval_, 0.05f, 0.10f, 4.5f, "%.2f sec");
+	}
+	if (ImGui::CollapsingHeader("Phase 2 Shadow Pillars", ImGuiTreeNodeFlags_DefaultOpen)) {
+		if (controlMode_ == ControlMode::kAnimationDebug && ImGui::Button("Play P2 Shadow Pillars")) { StartAnimation(AnimationType::kPhaseTwoPillars); }
+		ImGui::DragFloat("P2 pillars speed", &phaseTwoPillarsPlaybackSpeed_, 0.05f, 0.10f, 3.0f);
+		ImGui::DragFloat("P2 pillars duration", &phaseTwoPillarsPlaybackDuration_, 0.05f, 1.00f, 10.0f, "%.2f sec");
 	}
 	ImGui::SeparatorText("Playback Debug");
 	ImGui::Text("Playing: %s", GetActiveAnimationName());
@@ -771,7 +870,14 @@ void BossArmature::UpdateIdleAnimation() {
 
 	const float breath =
 	    std::sin(idleAnimationTimer_ / cycleDuration * 2.0f * std::numbers::pi_v<float>) * idleBlend;
-	joints_[kRoot].translation.y = defaultTranslations_[kRoot].y + breath * idleMoveAmount_;
+	float retreatJump = 0.0f;
+	if (controlMode_ == ControlMode::kPlayTest && aiState_ == AIState::kRetreat) {
+		const float progress = 1.0f - std::clamp(
+		    retreatTimer_ / (std::max)(retreatDuration_, kFrameTime), 0.0f, 1.0f);
+		retreatJump = std::sin(progress * std::numbers::pi_v<float>) * retreatJumpHeight_;
+	}
+	joints_[kRoot].translation.y =
+	    defaultTranslations_[kRoot].y + breath * idleMoveAmount_ + retreatJump;
 	joints_[kRoot].scale = {
 	    defaultScales_[kRoot].x * (1.0f - breath * idleScaleAmount_ * 0.45f),
 	    defaultScales_[kRoot].y * (1.0f + breath * idleScaleAmount_),
@@ -878,6 +984,18 @@ void BossArmature::SetAIEnabled(bool enabled) {
 	FacePlayer();
 }
 
+void BossArmature::StartPhaseTwoAI() {
+	// The Phase 2 opener is deterministic: begin the pillar sequence as soon as
+	// the transition finishes. Its normal completion returns the state machine
+	// to Waiting, where the regular Phase 2 distance decisions resume.
+	isPhaseTwo_ = true;
+	aiEnabled_ = true;
+	aiWaitTimer_ = 0.0f;
+	retreatTimer_ = 0.0f;
+	lastAIRoll_ = -1;
+	EnterAIState(AIState::kPhaseTwoPillars);
+}
+
 void BossArmature::SetHorizontalBounds(float minX, float maxX) {
 	movementMinX_ = (std::min)(minX, maxX);
 	movementMaxX_ = (std::max)(minX, maxX);
@@ -898,6 +1016,17 @@ BossArmature::CollisionBox BossArmature::GetBodyHitbox() const {
 }
 
 BossArmature::CollisionBox BossArmature::GetScytheHitbox() const {
+	if (activeAnimation_ == AnimationType::kScytheThrow && useExplicitScythePose_) {
+		// Throw uses a compact 2D gameplay band rather than the large rotating
+		// weapon bounds. Grounded and single-jump players remain inside this band,
+		// while the double-jump peak clears its fixed top edge.
+		return {
+		    {explicitScytheCenter_.x - throwHitboxHalfWidth_, throwHitboxMinimumY_,
+		     explicitScytheCenter_.z - throwHitboxHalfDepth_},
+		    {explicitScytheCenter_.x + throwHitboxHalfWidth_, throwHitboxMaximumY_,
+		     explicitScytheCenter_.z + throwHitboxHalfDepth_}};
+	}
+
 	auto scaleBox = [this](const CollisionBox& box) {
 		const Vector3 center = {
 		    (box.min.x + box.max.x) * 0.5f,
@@ -907,9 +1036,10 @@ BossArmature::CollisionBox BossArmature::GetScytheHitbox() const {
 		    (box.max.x - box.min.x) * 0.5f * weaponHitboxScale_,
 		    (box.max.y - box.min.y) * 0.5f * weaponHitboxScale_,
 		    (box.max.z - box.min.z) * 0.5f * weaponHitboxScale_};
-		return CollisionBox{
+		CollisionBox result = {
 		    {center.x - half.x, center.y - half.y, center.z - half.z},
 		    {center.x + half.x, center.y + half.y, center.z + half.z}};
+		return result;
 	};
 	Vector3 gripA = joints_[kRightHand].worldPosition;
 	Vector3 gripB = joints_[kLeftHand].worldPosition;
@@ -985,16 +1115,95 @@ bool BossArmature::IsScytheAttackActive() const {
 		return animationTime_ >= 0.20f && animationTime_ <= 1.72f;
 	case AnimationType::kVerticalHook:
 		return animationTime_ >= 0.32f && animationTime_ <= 0.92f;
+	case AnimationType::kJumpSlam:
+		return animationTime_ >= 0.96f && animationTime_ <= 1.16f;
+	case AnimationType::kPhaseTwoUppercut:
+		return animationTime_ >= 0.18f && animationTime_ <= 0.68f;
+	case AnimationType::kPhaseTwoGroundWave:
+	case AnimationType::kPhaseTwoPillars:
+		return false;
 	case AnimationType::kNone:
 		return false;
 	}
 	return false;
 }
 
-bool BossArmature::IsBodyAttackActive() const { return activeAnimation_ != AnimationType::kNone; }
+bool BossArmature::IsBodyAttackActive() const {
+	// The boss body is a hurtbox and a solid obstacle only. Damage comes from
+	// the weapon and special attacks, so touching the boss during wind-up never
+	// damages the player.
+	return false;
+}
 
 bool BossArmature::IsVerticalHookAttackActive() const {
 	return activeAnimation_ == AnimationType::kVerticalHook && animationTime_ >= 0.32f && animationTime_ <= 0.92f;
+}
+
+bool BossArmature::IsJumpSlamImpactActive() const {
+	return activeAnimation_ == AnimationType::kJumpSlam && animationTime_ >= 0.96f && animationTime_ <= 1.16f;
+}
+
+bool BossArmature::GetGroundWaveHitbox(std::size_t index, CollisionBox& hitbox) const {
+	if (index >= kGroundWaveCount || activeAnimation_ != AnimationType::kPhaseTwoGroundWave) {
+		return false;
+	}
+	const float waveStartTime = kPhaseTwoGroundWaveImpactTime +
+	                            static_cast<float>(index) * phaseTwoGroundWaveInterval_;
+	const float elapsed = animationTime_ - waveStartTime;
+	if (elapsed < 0.0f || elapsed > kPhaseTwoGroundWaveTravelDuration) { return false; }
+	const float progress = SmoothStep(elapsed / kPhaseTwoGroundWaveTravelDuration);
+	const float direction = facingDirection_ < 0.0f ? -1.0f : 1.0f;
+	const float centerX = animationBaseTranslations_[kRoot].x +
+	                      direction * (1.25f + phaseTwoGroundWaveRange_ * progress);
+	hitbox = {
+	    {centerX - phaseTwoGroundWaveHalfWidth_, 2.00f, -1.50f},
+	    {centerX + phaseTwoGroundWaveHalfWidth_, 2.00f + phaseTwoGroundWaveHeight_, 1.50f}};
+	return true;
+}
+
+bool BossArmature::GetShadowPillarState(
+    std::size_t index, CollisionBox& hitbox, float& telegraphProgress,
+    bool& damaging) const {
+	if (index >= kShadowPillarCount || activeAnimation_ != AnimationType::kPhaseTwoPillars ||
+	    !shadowPillarTargetLocked_[index]) {
+		return false;
+	}
+	const float startTime = kShadowPillarFirstTelegraphTime +
+	                        static_cast<float>(index) * kShadowPillarInterval;
+	const float elapsed = animationTime_ - startTime;
+	if (elapsed < 0.0f || elapsed > kShadowPillarTelegraphDuration + kShadowPillarActiveDuration) {
+		return false;
+	}
+	telegraphProgress = std::clamp(elapsed / kShadowPillarTelegraphDuration, 0.0f, 1.0f);
+	damaging = elapsed >= kShadowPillarTelegraphDuration;
+	const float centerX = shadowPillarTargetX_[index];
+	const float activeElapsed = (std::max)(0.0f, elapsed - kShadowPillarTelegraphDuration);
+	const float riseProgress = SmoothStep(std::clamp(activeElapsed / kShadowPillarRiseDuration, 0.0f, 1.0f));
+	const float pillarTop = 2.00f + (10.50f - 2.00f) * riseProgress;
+	hitbox = {{centerX - 0.62f, 2.00f, -1.50f}, {centerX + 0.62f, pillarTop, 1.50f}};
+	return true;
+}
+
+void BossArmature::UpdatePhaseTwoAttackState() {
+	if (activeAnimation_ != AnimationType::kPhaseTwoPillars) {
+		shadowPillarTargetLocked_.fill(false);
+		return;
+	}
+	for (std::size_t index = 0; index < kShadowPillarCount; ++index) {
+		const float startTime = kShadowPillarFirstTelegraphTime +
+		                        static_cast<float>(index) * kShadowPillarInterval;
+		if (!shadowPillarTargetLocked_[index] && animationTime_ >= startTime) {
+			shadowPillarTargetX_[index] = std::clamp(
+			    playerTargetPosition_.x, movementMinX_, movementMaxX_);
+			shadowPillarTargetLocked_[index] = true;
+		}
+	}
+}
+
+bool BossArmature::ConsumeSlamImpact() {
+	const bool impact = slamImpactPending_;
+	slamImpactPending_ = false;
+	return impact;
 }
 
 void BossArmature::UpdateAI() {
@@ -1007,8 +1216,12 @@ void BossArmature::UpdateAI() {
 		if (aiWaitTimer_ <= 0.0f) { PickNextAIAction(); }
 		break;
 	case AIState::kRetreat:
-		FacePlayer();
-		MoveBossX(-facingDirection_ * retreatSpeed_ * kFrameTime);
+		{
+			const float difference = retreatTargetX_ - defaultTranslations_[kRoot].x;
+			const float movement = std::clamp(
+			    difference, -retreatSpeed_ * kFrameTime, retreatSpeed_ * kFrameTime);
+			MoveBossX(movement);
+		}
 		retreatTimer_ = (std::max)(0.0f, retreatTimer_ - kFrameTime);
 		if (retreatTimer_ <= 0.0f) { EnterAIState(AIState::kWaiting); }
 		break;
@@ -1027,9 +1240,43 @@ void BossArmature::UpdateAI() {
 			}
 		}
 		break;
+	case AIState::kJumpSlam:
+		if (activeAnimation_ == AnimationType::kNone) {
+			EnterAIState(AIState::kWaiting);
+			break;
+		}
+		if (animationTime_ >= kJumpSlamLaunchTime && animationTime_ < kJumpSlamImpactTime) {
+			const float difference = actionTargetPosition_.x - defaultTranslations_[kRoot].x;
+			const float distance = std::abs(difference);
+			if (distance > jumpSlamStopDistance_) {
+				const float direction = difference < 0.0f ? -1.0f : 1.0f;
+				const float movement = (std::min)(jumpSlamMoveSpeed_ * kFrameTime, distance - jumpSlamStopDistance_);
+				MoveBossX(direction * movement);
+			}
+		}
+		break;
+	case AIState::kPhaseTwoUppercut:
+		if (activeAnimation_ == AnimationType::kNone) {
+			EnterAIState(AIState::kWaiting);
+			break;
+		}
+		if (animationTime_ >= 0.16f && animationTime_ < 0.58f) {
+			const float difference = playerTargetPosition_.x - defaultTranslations_[kRoot].x;
+			const float distance = std::abs(difference);
+			if (distance > phaseTwoUppercutStopDistance_) {
+				const float direction = difference < 0.0f ? -1.0f : 1.0f;
+				const float movement = (std::min)(
+				    phaseTwoUppercutDashSpeed_ * kFrameTime,
+				    distance - phaseTwoUppercutStopDistance_);
+				MoveBossX(direction * movement);
+			}
+		}
+		break;
 	case AIState::kMeleeAttack:
 	case AIState::kVerticalHook:
 	case AIState::kScytheThrow:
+	case AIState::kPhaseTwoGroundWave:
+	case AIState::kPhaseTwoPillars:
 		if (activeAnimation_ == AnimationType::kNone) { EnterAIState(AIState::kWaiting); }
 		break;
 	}
@@ -1038,15 +1285,56 @@ void BossArmature::UpdateAI() {
 void BossArmature::PickNextAIAction() {
 	FacePlayer();
 	lastAIRoll_ = NextRandomPercent();
+	if (isPhaseTwo_) {
+		if (playerDistance_ < closeDistance_) {
+			if (lastAIRoll_ < phaseTwoCloseUppercutChance_) {
+				EnterAIState(AIState::kPhaseTwoUppercut);
+			} else if (lastAIRoll_ < phaseTwoCloseUppercutChance_ + phaseTwoCloseMeleeChance_) {
+				EnterAIState(AIState::kMeleeAttack);
+			} else {
+				EnterAIState(AIState::kRetreat);
+			}
+			return;
+		}
+		if (playerDistance_ < midDistance_) {
+			if (lastAIRoll_ < phaseTwoMidGroundWaveChance_) {
+				EnterAIState(AIState::kPhaseTwoGroundWave);
+			} else if (lastAIRoll_ < phaseTwoMidGroundWaveChance_ + phaseTwoMidSpinChance_) {
+				EnterAIState(AIState::kSpinAttack);
+			} else if (
+			    lastAIRoll_ < phaseTwoMidGroundWaveChance_ + phaseTwoMidSpinChance_ +
+			                        phaseTwoMidHookChance_) {
+				EnterAIState(AIState::kVerticalHook);
+			} else {
+				EnterAIState(AIState::kRetreat);
+			}
+			return;
+		}
+		if (lastAIRoll_ < phaseTwoFarJumpSlamChance_) {
+			EnterAIState(AIState::kJumpSlam);
+		} else if (lastAIRoll_ < phaseTwoFarJumpSlamChance_ + phaseTwoFarThrowChance_) {
+			EnterAIState(AIState::kScytheThrow);
+		} else {
+			EnterAIState(AIState::kPhaseTwoPillars);
+		}
+		return;
+	}
+
 	if (playerDistance_ < closeDistance_) {
 		EnterAIState(lastAIRoll_ < closeMeleeChance_ ? AIState::kMeleeAttack : AIState::kRetreat);
 		return;
 	}
 	if (playerDistance_ < midDistance_) {
-		EnterAIState(lastAIRoll_ < midSpinChance_ ? AIState::kSpinAttack : AIState::kVerticalHook);
+		if (lastAIRoll_ < midHookChance_) {
+			EnterAIState(AIState::kVerticalHook);
+		} else if (lastAIRoll_ < midHookChance_ + midSpinChance_) {
+			EnterAIState(AIState::kSpinAttack);
+		} else {
+			EnterAIState(AIState::kRetreat);
+		}
 		return;
 	}
-	EnterAIState(lastAIRoll_ < farThrowChance_ ? AIState::kScytheThrow : AIState::kWaiting);
+	EnterAIState(lastAIRoll_ < farThrowChance_ ? AIState::kScytheThrow : AIState::kJumpSlam);
 }
 
 void BossArmature::EnterAIState(AIState state) {
@@ -1066,6 +1354,25 @@ void BossArmature::EnterAIState(AIState state) {
 		break;
 	case AIState::kRetreat:
 		retreatTimer_ = retreatDuration_;
+		{
+			// Prefer a landing point one mid-range band away from the player. If
+			// the arena wall blocks a conventional backward jump, leap over the
+			// player to the opposite side so close-range pressure is still broken.
+			const float desiredSeparation = midDistance_ + 1.0f;
+			const float leftCandidate = std::clamp(
+			    playerTargetPosition_.x - desiredSeparation, movementMinX_, movementMaxX_);
+			const float rightCandidate = std::clamp(
+			    playerTargetPosition_.x + desiredSeparation, movementMinX_, movementMaxX_);
+			const float leftSeparation = std::abs(leftCandidate - playerTargetPosition_.x);
+			const float rightSeparation = std::abs(rightCandidate - playerTargetPosition_.x);
+			if (std::abs(leftSeparation - rightSeparation) <= 0.001f) {
+				retreatTargetX_ = defaultTranslations_[kRoot].x < playerTargetPosition_.x
+				                      ? leftCandidate
+				                      : rightCandidate;
+			} else {
+				retreatTargetX_ = leftSeparation > rightSeparation ? leftCandidate : rightCandidate;
+			}
+		}
 		break;
 	case AIState::kSpinAttack:
 		StartAnimation(AnimationType::kSpinAttack);
@@ -1075,6 +1382,18 @@ void BossArmature::EnterAIState(AIState state) {
 		break;
 	case AIState::kScytheThrow:
 		StartAnimation(AnimationType::kScytheThrow);
+		break;
+	case AIState::kJumpSlam:
+		StartAnimation(AnimationType::kJumpSlam);
+		break;
+	case AIState::kPhaseTwoUppercut:
+		StartAnimation(AnimationType::kPhaseTwoUppercut);
+		break;
+	case AIState::kPhaseTwoGroundWave:
+		StartAnimation(AnimationType::kPhaseTwoGroundWave);
+		break;
+	case AIState::kPhaseTwoPillars:
+		StartAnimation(AnimationType::kPhaseTwoPillars);
 		break;
 	}
 }
@@ -1346,6 +1665,175 @@ void BossArmature::InitializeVerticalHookClip() {
 	recoil.rotationOffsets[kRightElbow].z = 0.15f;
 }
 
+void BossArmature::InitializeJumpSlamClip() {
+	for (AttackKeyframe& keyframe : jumpSlamKeyframes_) { keyframe = {}; }
+	jumpSlamKeyframes_[0].time = 0.00f;
+	jumpSlamKeyframes_[1].time = 0.28f;
+	jumpSlamKeyframes_[2].time = 0.62f;
+	jumpSlamKeyframes_[3].time = 0.88f;
+	jumpSlamKeyframes_[4].time = kJumpSlamImpactTime;
+	jumpSlamKeyframes_[5].time = kJumpSlamDuration;
+
+	// Crouch and lift the hammer. The poses stay deliberately simple so they
+	// remain easy to adjust in the existing keyframe editor.
+	AttackPose& crouch = jumpSlamKeyframes_[1].pose;
+	crouch.translationOffsets[kRoot].y = -0.38f;
+	crouch.rotationOffsets[kBody].z = 0.08f;
+	crouch.rotationOffsets[kChest].z = 0.12f;
+	crouch.rotationOffsets[kLeftShoulder].z = 0.35f;
+	crouch.rotationOffsets[kLeftElbow].z = 0.45f;
+	crouch.rotationOffsets[kRightShoulder].z = -0.35f;
+	crouch.rotationOffsets[kRightElbow].z = 0.45f;
+
+	// Rise with both hands holding the weapon above the body.
+	AttackPose& apex = jumpSlamKeyframes_[2].pose;
+	apex.translationOffsets[kRoot].y = 3.20f;
+	apex.rotationOffsets[kBody].z = -0.04f;
+	apex.rotationOffsets[kChest].z = -0.08f;
+	apex.rotationOffsets[kLeftShoulder].z = 0.70f;
+	apex.rotationOffsets[kLeftElbow].z = 0.50f;
+	apex.rotationOffsets[kRightShoulder].z = -0.70f;
+	apex.rotationOffsets[kRightElbow].z = 0.50f;
+
+	// Start the fall while keeping the same readable two-handed overhead pose.
+	AttackPose& fall = jumpSlamKeyframes_[3].pose;
+	fall = apex;
+	fall.translationOffsets[kRoot].y = 1.35f;
+	fall.rotationOffsets[kBody].z = -0.10f;
+	fall.rotationOffsets[kChest].z = -0.16f;
+
+	// One compact impact pose: body low, torso forward, weapon driven downward.
+	AttackPose& impact = jumpSlamKeyframes_[4].pose;
+	impact.translationOffsets[kRoot].y = -0.12f;
+	impact.rotationOffsets[kBody].z = -0.18f;
+	impact.rotationOffsets[kChest].z = -0.26f;
+	impact.rotationOffsets[kHead].z = 0.08f;
+	impact.rotationOffsets[kLeftShoulder].z = -0.20f;
+	impact.rotationOffsets[kLeftElbow].z = 0.18f;
+	impact.rotationOffsets[kRightShoulder].z = 0.20f;
+	impact.rotationOffsets[kRightElbow].z = -0.18f;
+	// Frame 6 is the zero pose, giving the shared smoother recovery path an
+	// exact idle target without a snap.
+}
+
+void BossArmature::InitializePhaseTwoUppercutClip() {
+	for (AttackKeyframe& keyframe : phaseTwoUppercutKeyframes_) { keyframe = {}; }
+	phaseTwoUppercutKeyframes_[0].time = 0.00f;
+	phaseTwoUppercutKeyframes_[1].time = 0.18f;
+	phaseTwoUppercutKeyframes_[2].time = 0.38f;
+	phaseTwoUppercutKeyframes_[3].time = 0.58f;
+	phaseTwoUppercutKeyframes_[4].time = 0.82f;
+	phaseTwoUppercutKeyframes_[5].time = kPhaseTwoUppercutDuration;
+
+	AttackPose& windUp = phaseTwoUppercutKeyframes_[1].pose;
+	windUp.translationOffsets[kRoot].y = -0.18f;
+	windUp.rotationOffsets[kBody].z = 0.10f;
+	windUp.rotationOffsets[kChest].z = 0.16f;
+	windUp.rotationOffsets[kLeftShoulder].z = 0.16f;
+	windUp.rotationOffsets[kLeftElbow].z = 0.20f;
+	windUp.rotationOffsets[kRightShoulder].z = -0.22f;
+	windUp.rotationOffsets[kRightElbow].z = 0.22f;
+
+	AttackPose& uppercut = phaseTwoUppercutKeyframes_[2].pose;
+	uppercut.translationOffsets[kRoot].y = 0.65f;
+	uppercut.rotationOffsets[kBody].z = -0.14f;
+	uppercut.rotationOffsets[kChest].z = -0.22f;
+	uppercut.rotationOffsets[kHead].z = 0.06f;
+	uppercut.rotationOffsets[kLeftShoulder].z = -0.22f;
+	uppercut.rotationOffsets[kLeftElbow].z = 0.18f;
+	uppercut.rotationOffsets[kRightShoulder].z = 0.28f;
+	uppercut.rotationOffsets[kRightElbow].z = -0.16f;
+
+	AttackPose& followThrough = phaseTwoUppercutKeyframes_[3].pose;
+	followThrough = uppercut;
+	followThrough.translationOffsets[kRoot].y = 0.35f;
+	followThrough.rotationOffsets[kBody].z = -0.08f;
+	followThrough.rotationOffsets[kChest].z = -0.12f;
+
+	AttackPose& land = phaseTwoUppercutKeyframes_[4].pose;
+	land.translationOffsets[kRoot].y = -0.08f;
+	land.rotationOffsets[kBody].z = 0.04f;
+	land.rotationOffsets[kChest].z = 0.06f;
+	land.rotationOffsets[kLeftShoulder].z = -0.06f;
+	land.rotationOffsets[kRightShoulder].z = 0.06f;
+}
+
+void BossArmature::InitializePhaseTwoGroundWaveClip() {
+	for (AttackKeyframe& keyframe : phaseTwoGroundWaveKeyframes_) { keyframe = {}; }
+	phaseTwoGroundWaveKeyframes_[0].time = 0.00f;
+	phaseTwoGroundWaveKeyframes_[1].time = 0.30f;
+	phaseTwoGroundWaveKeyframes_[2].time = 0.52f;
+	phaseTwoGroundWaveKeyframes_[3].time = kPhaseTwoGroundWaveImpactTime;
+	phaseTwoGroundWaveKeyframes_[4].time = 8.35f;
+	phaseTwoGroundWaveKeyframes_[5].time = kPhaseTwoGroundWaveDuration;
+
+	AttackPose& raise = phaseTwoGroundWaveKeyframes_[1].pose;
+	raise.translationOffsets[kRoot].y = -0.12f;
+	raise.rotationOffsets[kBody].z = 0.10f;
+	raise.rotationOffsets[kChest].z = 0.16f;
+	raise.rotationOffsets[kLeftShoulder].z = 0.40f;
+	raise.rotationOffsets[kLeftElbow].z = 0.32f;
+	raise.rotationOffsets[kRightShoulder].z = -0.40f;
+	raise.rotationOffsets[kRightElbow].z = 0.32f;
+
+	AttackPose& hold = phaseTwoGroundWaveKeyframes_[2].pose;
+	hold = raise;
+	hold.translationOffsets[kRoot].y = -0.18f;
+	hold.rotationOffsets[kChest].z = 0.20f;
+
+	AttackPose& slam = phaseTwoGroundWaveKeyframes_[3].pose;
+	slam.translationOffsets[kRoot].y = -0.25f;
+	slam.rotationOffsets[kBody].z = -0.18f;
+	slam.rotationOffsets[kChest].z = -0.28f;
+	slam.rotationOffsets[kHead].z = 0.08f;
+	slam.rotationOffsets[kLeftShoulder].z = -0.20f;
+	slam.rotationOffsets[kLeftElbow].z = 0.18f;
+	slam.rotationOffsets[kRightShoulder].z = 0.20f;
+	slam.rotationOffsets[kRightElbow].z = -0.18f;
+
+	AttackPose& recoil = phaseTwoGroundWaveKeyframes_[4].pose;
+	recoil.translationOffsets[kRoot].y = -0.10f;
+	recoil.rotationOffsets[kBody].z = -0.08f;
+	recoil.rotationOffsets[kChest].z = -0.12f;
+	recoil.rotationOffsets[kLeftShoulder].z = -0.08f;
+	recoil.rotationOffsets[kRightShoulder].z = 0.08f;
+}
+
+void BossArmature::InitializePhaseTwoPillarsClip() {
+	for (AttackKeyframe& keyframe : phaseTwoPillarsKeyframes_) { keyframe = {}; }
+	phaseTwoPillarsKeyframes_[0].time = 0.00f;
+	phaseTwoPillarsKeyframes_[1].time = 0.90f;
+	phaseTwoPillarsKeyframes_[2].time = 2.20f;
+	phaseTwoPillarsKeyframes_[3].time = 6.00f;
+	phaseTwoPillarsKeyframes_[4].time = 9.20f;
+	phaseTwoPillarsKeyframes_[5].time = kPhaseTwoPillarsDuration;
+
+	AttackPose& cast = phaseTwoPillarsKeyframes_[1].pose;
+	cast.translationOffsets[kRoot].y = 0.12f;
+	cast.rotationOffsets[kBody].z = -0.04f;
+	cast.rotationOffsets[kChest].z = -0.08f;
+	cast.rotationOffsets[kLeftShoulder].z = 0.32f;
+	cast.rotationOffsets[kLeftElbow].z = 0.24f;
+	cast.rotationOffsets[kRightShoulder].z = -0.32f;
+	cast.rotationOffsets[kRightElbow].z = 0.24f;
+
+	AttackPose& hold = phaseTwoPillarsKeyframes_[2].pose;
+	hold = cast;
+	hold.translationOffsets[kRoot].y = 0.20f;
+	hold.rotationOffsets[kChest].z = -0.12f;
+
+	AttackPose& pulse = phaseTwoPillarsKeyframes_[3].pose;
+	pulse = hold;
+	pulse.scaleOffsets[kRoot] = {0.05f, 0.08f, 0.05f};
+	pulse.rotationOffsets[kLeftShoulder].z = 0.40f;
+	pulse.rotationOffsets[kRightShoulder].z = -0.40f;
+
+	AttackPose& settle = phaseTwoPillarsKeyframes_[4].pose;
+	settle.translationOffsets[kRoot].y = 0.06f;
+	settle.rotationOffsets[kLeftShoulder].z = 0.12f;
+	settle.rotationOffsets[kRightShoulder].z = -0.12f;
+}
+
 void BossArmature::StartAnimation(AnimationType animation) {
 	ClearIdlePose();
 	if (activeAnimation_ != AnimationType::kNone) {
@@ -1364,6 +1852,8 @@ void BossArmature::StartAnimation(AnimationType animation) {
 	}
 	activeAnimation_ = animation;
 	animationTime_ = 0.0f;
+	slamImpactPending_ = false;
+	shadowPillarTargetLocked_.fill(false);
 	isScytheDetached_ = false;
 	useExplicitScythePose_ = false;
 	hasScytheReleaseCenter_ = false;
@@ -1379,6 +1869,7 @@ void BossArmature::StopAnimation() {
 	}
 	activeAnimation_ = AnimationType::kNone;
 	animationTime_ = 0.0f;
+	shadowPillarTargetLocked_.fill(false);
 	isScytheDetached_ = false;
 	useExplicitScythePose_ = false;
 	hasScytheReleaseCenter_ = false;
@@ -1423,6 +1914,18 @@ BossArmature::AttackKeyframe* BossArmature::GetEditableKeyframes(
 	case AnimationType::kVerticalHook:
 		count = verticalHookKeyframes_.size();
 		return verticalHookKeyframes_.data();
+	case AnimationType::kJumpSlam:
+		count = jumpSlamKeyframes_.size();
+		return jumpSlamKeyframes_.data();
+	case AnimationType::kPhaseTwoUppercut:
+		count = phaseTwoUppercutKeyframes_.size();
+		return phaseTwoUppercutKeyframes_.data();
+	case AnimationType::kPhaseTwoGroundWave:
+		count = phaseTwoGroundWaveKeyframes_.size();
+		return phaseTwoGroundWaveKeyframes_.data();
+	case AnimationType::kPhaseTwoPillars:
+		count = phaseTwoPillarsKeyframes_.size();
+		return phaseTwoPillarsKeyframes_.data();
 	case AnimationType::kNone:
 		break;
 	}
@@ -1523,6 +2026,22 @@ void BossArmature::UpdateAnimation() {
 		keyframes = verticalHookKeyframes_.data();
 		keyframeCount = verticalHookKeyframes_.size();
 		break;
+	case AnimationType::kJumpSlam:
+		keyframes = jumpSlamKeyframes_.data();
+		keyframeCount = jumpSlamKeyframes_.size();
+		break;
+	case AnimationType::kPhaseTwoUppercut:
+		keyframes = phaseTwoUppercutKeyframes_.data();
+		keyframeCount = phaseTwoUppercutKeyframes_.size();
+		break;
+	case AnimationType::kPhaseTwoGroundWave:
+		keyframes = phaseTwoGroundWaveKeyframes_.data();
+		keyframeCount = phaseTwoGroundWaveKeyframes_.size();
+		break;
+	case AnimationType::kPhaseTwoPillars:
+		keyframes = phaseTwoPillarsKeyframes_.data();
+		keyframeCount = phaseTwoPillarsKeyframes_.size();
+		break;
 	case AnimationType::kNone:
 		return;
 	}
@@ -1530,10 +2049,15 @@ void BossArmature::UpdateAnimation() {
 	const float duration = GetActiveAnimationDuration();
 	const float playbackDuration = (std::max)(GetActivePlaybackDuration(), 0.05f);
 	const float playbackSpeed = (std::max)(GetActivePlaybackSpeed(), 0.01f);
+	const float previousAnimationTime = animationTime_;
 	if (!pauseAnimation_) {
 		const float authoredTimeScale = duration / playbackDuration;
 		animationTime_ = (std::min)(
 		    animationTime_ + kFrameTime * playbackSpeed * authoredTimeScale, duration);
+	}
+	if (activeAnimation_ == AnimationType::kJumpSlam &&
+	    previousAnimationTime < kJumpSlamImpactTime && animationTime_ >= kJumpSlamImpactTime) {
+		slamImpactPending_ = true;
 	}
 	std::size_t endIndex = 1;
 	while (endIndex < keyframeCount - 1 && animationTime_ > keyframes[endIndex].time) { ++endIndex; }
@@ -1777,6 +2301,7 @@ void BossArmature::UpdateScytheState() {
 			};
 			const float aimLength = std::sqrt(
 			    aimOffset.x * aimOffset.x + aimOffset.y * aimOffset.y + aimOffset.z * aimOffset.z);
+			scytheThrowFlightDistance_ = (std::min)(aimLength, scytheThrowRange_);
 			scytheFlightDirection_ = aimLength > 0.001f
 			                              ? Vector3{aimOffset.x / aimLength, aimOffset.y / aimLength, aimOffset.z / aimLength}
 			                              : Vector3{facingDirection_, 0.0f, 0.0f};
@@ -1788,9 +2313,9 @@ void BossArmature::UpdateScytheState() {
 		const Vector3 movingAnchor = Lerp(scytheReleaseCenter_, throwingHand, flightProgress);
 		const float travelArc = std::sin(flightProgress * std::numbers::pi_v<float>);
 		explicitScytheCenter_ = {
-		    movingAnchor.x + scytheFlightDirection_.x * scytheThrowRange_ * travelArc,
-		    movingAnchor.y + scytheFlightDirection_.y * scytheThrowRange_ * travelArc + scytheThrowArcHeight_ * travelArc + 0.22f * std::sin(flightProgress * 2.0f * std::numbers::pi_v<float>),
-		    movingAnchor.z + scytheFlightDirection_.z * scytheThrowRange_ * travelArc,
+		    movingAnchor.x + scytheFlightDirection_.x * scytheThrowFlightDistance_ * travelArc,
+		    movingAnchor.y + scytheFlightDirection_.y * scytheThrowFlightDistance_ * travelArc + scytheThrowArcHeight_ * travelArc + 0.22f * std::sin(flightProgress * 2.0f * std::numbers::pi_v<float>),
+		    movingAnchor.z + scytheFlightDirection_.z * scytheThrowFlightDistance_ * travelArc,
 		};
 		explicitScytheRotation_ =
 		    releaseAngle + flightProgress * scytheThrowSpinCount_ * 2.0f * std::numbers::pi_v<float>;
@@ -1816,6 +2341,14 @@ float BossArmature::GetActiveAnimationDuration() const {
 		return kSpinAttackDuration;
 	case AnimationType::kVerticalHook:
 		return kVerticalHookDuration;
+	case AnimationType::kJumpSlam:
+		return kJumpSlamDuration;
+	case AnimationType::kPhaseTwoUppercut:
+		return kPhaseTwoUppercutDuration;
+	case AnimationType::kPhaseTwoGroundWave:
+		return kPhaseTwoGroundWaveDuration;
+	case AnimationType::kPhaseTwoPillars:
+		return kPhaseTwoPillarsDuration;
 	case AnimationType::kNone:
 		return 0.0f;
 	}
@@ -1832,6 +2365,14 @@ float BossArmature::GetActivePlaybackDuration() const {
 		return spinAttackPlaybackDuration_;
 	case AnimationType::kVerticalHook:
 		return verticalHookPlaybackDuration_;
+	case AnimationType::kJumpSlam:
+		return jumpSlamPlaybackDuration_;
+	case AnimationType::kPhaseTwoUppercut:
+		return phaseTwoUppercutPlaybackDuration_;
+	case AnimationType::kPhaseTwoGroundWave:
+		return phaseTwoGroundWavePlaybackDuration_;
+	case AnimationType::kPhaseTwoPillars:
+		return phaseTwoPillarsPlaybackDuration_;
 	case AnimationType::kNone:
 		return 0.0f;
 	}
@@ -1848,6 +2389,14 @@ float BossArmature::GetActivePlaybackSpeed() const {
 		return spinAttackPlaybackSpeed_;
 	case AnimationType::kVerticalHook:
 		return verticalHookPlaybackSpeed_;
+	case AnimationType::kJumpSlam:
+		return jumpSlamPlaybackSpeed_;
+	case AnimationType::kPhaseTwoUppercut:
+		return phaseTwoUppercutPlaybackSpeed_;
+	case AnimationType::kPhaseTwoGroundWave:
+		return phaseTwoGroundWavePlaybackSpeed_;
+	case AnimationType::kPhaseTwoPillars:
+		return phaseTwoPillarsPlaybackSpeed_;
 	case AnimationType::kNone:
 		return 1.0f;
 	}
@@ -1864,6 +2413,14 @@ const char* BossArmature::GetActiveAnimationName() const {
 		return "Spin Attack";
 	case AnimationType::kVerticalHook:
 		return "Vertical Hook";
+	case AnimationType::kJumpSlam:
+		return "Jump Slam";
+	case AnimationType::kPhaseTwoUppercut:
+		return "Phase 2 Dash Uppercut";
+	case AnimationType::kPhaseTwoGroundWave:
+		return "Phase 2 Ground Wave";
+	case AnimationType::kPhaseTwoPillars:
+		return "Phase 2 Shadow Pillars";
 	case AnimationType::kNone:
 		return "None";
 	}
@@ -1877,13 +2434,21 @@ const char* BossArmature::GetAIStateName() const {
 	case AIState::kMeleeAttack:
 		return "Melee Attack";
 	case AIState::kRetreat:
-		return "Retreat";
+		return "Jump Retreat";
 	case AIState::kSpinAttack:
 		return "Spin Attack";
 	case AIState::kVerticalHook:
 		return "Vertical Hook";
 	case AIState::kScytheThrow:
 		return "Scythe Throw";
+	case AIState::kJumpSlam:
+		return "Jump Slam";
+	case AIState::kPhaseTwoUppercut:
+		return "Phase 2 Dash Uppercut";
+	case AIState::kPhaseTwoGroundWave:
+		return "Phase 2 Ground Wave";
+	case AIState::kPhaseTwoPillars:
+		return "Phase 2 Shadow Pillars";
 	}
 	return "Unknown";
 }

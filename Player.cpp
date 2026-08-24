@@ -1,4 +1,5 @@
 #include "Player.h"
+#include "GamepadInput.h"
 #include "Matrix4x4Calculation.h"
 #include <algorithm>
 #include <cmath>
@@ -14,6 +15,7 @@ void Player::Initialize() {
 	attackEffectModel_ = Model::CreateFromOBJ("hit_effect", true);
 	velocity_ = {};
 	onGround_ = false;
+	jumpsRemaining_ = 2;
 	canAirDash_ = true;
 	canAirAttack_ = true;
 	actionState_ = ActionState::kNormal;
@@ -24,6 +26,8 @@ void Player::Initialize() {
 	damageBlinkTimer_ = 0.0f;
 	pullStartX_ = 0.0f;
 	pullTargetX_ = 0.0f;
+	pullStartY_ = 0.0f;
+	pullLiftAmount_ = 0.0f;
 	pullTimer_ = 0.0f;
 	pullDuration_ = 0.0f;
 	pullActive_ = false;
@@ -54,11 +58,13 @@ void Player::ResolveHorizontalPush(float positionX) {
 	UpdateWorldMatrix();
 }
 
-void Player::StartPullToward(float targetX, float maximumDistance, float duration) {
+void Player::StartPullToward(float targetX, float maximumDistance, float duration, float liftAmount) {
 	const float minimumCenterX = hasLeftBoundary_ ? (std::max)(kMapMinCenterX, leftBoundary_) : kMapMinCenterX;
 	const float distance = std::clamp(targetX - worldTransform_.translation_.x, -std::abs(maximumDistance), std::abs(maximumDistance));
 	pullStartX_ = worldTransform_.translation_.x;
 	pullTargetX_ = std::clamp(pullStartX_ + distance, minimumCenterX, kMapMaxCenterX);
+	pullStartY_ = worldTransform_.translation_.y;
+	pullLiftAmount_ = (std::max)(liftAmount, 0.0f);
 	pullTimer_ = 0.0f;
 	pullDuration_ = (std::max)(duration, kFrameTime);
 	pullActive_ = std::abs(pullTargetX_ - pullStartX_) > kCollisionEpsilon;
@@ -69,13 +75,18 @@ void Player::NotifyDamage() { damageBlinkTimer_ = kDamageBlinkDuration; }
 
 void Player::Update() {
 	Input* input = Input::GetInstance();
-	const bool right = input->PushKey(DIK_D);
-	const bool left = input->PushKey(DIK_A);
+	const GamepadInput::Snapshot gamepad = GamepadInput::ReadPlayerOne();
+	const bool right = input->PushKey(DIK_D) ||
+	                   GamepadInput::IsHeld(gamepad, XINPUT_GAMEPAD_DPAD_RIGHT);
+	const bool left = input->PushKey(DIK_A) ||
+	                  GamepadInput::IsHeld(gamepad, XINPUT_GAMEPAD_DPAD_LEFT);
 	dashCooldownTimer_ = (std::max)(0.0f, dashCooldownTimer_ - kFrameTime);
 
 	if (actionState_ == ActionState::kNormal) {
-		const bool attackTriggered = input->IsTriggerMouse(0);
-		const bool dashTriggered = input->IsTriggerMouse(1);
+		const bool attackTriggered = input->IsTriggerMouse(0) ||
+		                             GamepadInput::IsTriggered(gamepad, XINPUT_GAMEPAD_X);
+		const bool dashTriggered = input->IsTriggerMouse(1) ||
+		                           GamepadInput::IsTriggered(gamepad, XINPUT_GAMEPAD_B);
 		if (attackTriggered && (onGround_ || canAirAttack_)) {
 			actionState_ = ActionState::kAttack;
 			attackPhase_ = AttackPhase::kCharge;
@@ -110,9 +121,12 @@ void Player::Update() {
 			if (std::abs(velocity_.x) < 0.01f) { velocity_.x = 0.0f; }
 		}
 
-		if (onGround_ && input->TriggerKey(DIK_SPACE)) {
+		const bool jumpTriggered = input->TriggerKey(DIK_SPACE) ||
+		                           GamepadInput::IsTriggered(gamepad, XINPUT_GAMEPAD_A);
+		if (jumpTriggered && jumpsRemaining_ > 0) {
 			velocity_.y = kJumpAcceleration;
 			onGround_ = false;
+			--jumpsRemaining_;
 		} else if (!onGround_) {
 			velocity_.y = (std::max)(velocity_.y - kGravityAcceleration, -kMaxFallSpeed);
 		}
@@ -201,6 +215,7 @@ void Player::Update() {
 	if (collisionInfo.hitGround) {
 		velocity_.y = 0.0f;
 		onGround_ = true;
+		jumpsRemaining_ = 2;
 		canAirDash_ = true;
 		canAirAttack_ = true;
 	} else if (velocity_.y <= 0.0f) {
@@ -326,8 +341,9 @@ void Player::UpdatePullMotion() {
 	if (!pullActive_) { return; }
 	pullTimer_ = (std::min)(pullTimer_ + kFrameTime, pullDuration_);
 	const float t = pullTimer_ / pullDuration_;
-	const float easedT = t * t * (3.0f - 2.0f * t);
+	const float easedT = t * t * t * (t * (t * 6.0f - 15.0f) + 10.0f);
 	worldTransform_.translation_.x = std::lerp(pullStartX_, pullTargetX_, easedT);
+	worldTransform_.translation_.y = pullStartY_ + std::sin(t * std::numbers::pi_v<float>) * pullLiftAmount_;
 	velocity_.x = 0.0f;
 	if (pullTimer_ >= pullDuration_) { pullActive_ = false; }
 }
@@ -381,6 +397,24 @@ void Player::Draw(const Camera& camera) {
 
 	if (isAttackEffectVisible_ && attackEffectModel_ != nullptr) {
 		attackEffectModel_->Draw(attackEffectTransform_, camera);
+	}
+}
+
+void Player::DrawDashCooldownMeter(const Camera& camera) const {
+	if (dashCooldownTimer_ <= 0.0f) { return; }
+	const float remainingRatio = std::clamp(dashCooldownTimer_ / kDashCooldown, 0.0f, 1.0f);
+	const float left = worldTransform_.translation_.x - kDashMeterWidth * 0.5f;
+	const float right = worldTransform_.translation_.x + kDashMeterWidth * 0.5f;
+	const float fillRight = left + kDashMeterWidth * remainingRatio;
+	const float y = worldTransform_.translation_.y + kDashMeterHeightOffset;
+	const float z = worldTransform_.translation_.z - 0.25f;
+	PrimitiveDrawer* drawer = PrimitiveDrawer::GetInstance();
+	drawer->SetCamera(&camera);
+	for (float offset : {-0.025f, 0.0f, 0.025f}) {
+		drawer->DrawLine3d({left, y + offset, z}, {right, y + offset, z}, {0.03f, 0.03f, 0.03f, 0.75f});
+		if (fillRight > left) {
+			drawer->DrawLine3d({left, y + offset, z - 0.01f}, {fillRight, y + offset, z - 0.01f}, {1.0f, 1.0f, 1.0f, 1.0f});
+		}
 	}
 }
 

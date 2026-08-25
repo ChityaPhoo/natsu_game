@@ -1,6 +1,8 @@
 #include "DialogueSystem.h"
 #include "GamepadInput.h"
 #include <algorithm>
+#include <cmath>
+#include <numbers>
 
 using namespace KamataEngine;
 
@@ -11,8 +13,16 @@ void DialogueSystem::Initialize(
     Vector2 textureCropBase,
     Vector2 textureCropSize) {
 	for (Sprite* sprite : pageSprites_) { delete sprite; }
+	for (Sprite* sprite : contentSprites_) { delete sprite; }
+	for (Sprite*& indicator : advanceIndicators_) {
+		delete indicator;
+		indicator = nullptr;
+	}
 	pageSprites_.clear();
 	pageBaseColors_.clear();
+	contentSprites_.clear();
+	contentDisplaySize_ = {};
+	contentOffset_ = {};
 
 	const float windowWidth = static_cast<float>(WinApp::kWindowWidth);
 	const float windowHeight = static_cast<float>(WinApp::kWindowHeight);
@@ -32,19 +42,62 @@ void DialogueSystem::Initialize(
 		pageSprites_.push_back(pageSprite);
 		pageBaseColors_.push_back(baseColor);
 	}
+	const uint32_t indicatorTexture = TextureManager::Load("particle/circle.png");
+	for (std::size_t index = 0; index < advanceIndicators_.size(); ++index) {
+		const float horizontalOffset =
+		    (static_cast<float>(index) - 1.0f) * kAdvanceIndicatorSpacing;
+		advanceIndicators_[index] = Sprite::Create(
+		    indicatorTexture,
+		    {windowWidth - kAdvanceIndicatorRightPadding + horizontalOffset,
+		     windowHeight - kAdvanceIndicatorBottomPadding},
+		    {1.0f, 1.0f, 1.0f, 0.0f}, {0.5f, 0.5f});
+		advanceIndicators_[index]->SetSize({kAdvanceIndicatorSize, kAdvanceIndicatorSize});
+	}
 
 	currentPage_ = 0;
 	phaseTimer_ = 0.0f;
+	advanceIndicatorTimer_ = 0.0f;
 	currentVisibility_ = 0.0f;
 	phase_ = Phase::kIdle;
+}
+
+void DialogueSystem::SetPageContentSprites(
+    const std::vector<std::string>& spriteFiles, Vector2 displaySize, Vector2 offset) {
+	for (Sprite* sprite : contentSprites_) { delete sprite; }
+	contentSprites_.clear();
+	contentDisplaySize_ = displaySize;
+	contentOffset_ = offset;
+
+	const float windowWidth = static_cast<float>(WinApp::kWindowWidth);
+	const float windowHeight = static_cast<float>(WinApp::kWindowHeight);
+	const float pageCenterY = windowHeight - windowHeight * screenHeightRatio_ * 0.5f;
+	contentSprites_.resize(pageSprites_.size(), nullptr);
+	for (size_t index = 0; index < contentSprites_.size(); ++index) {
+		if (index >= spriteFiles.size() || spriteFiles[index].empty()) { continue; }
+		const uint32_t textureHandle = TextureManager::Load(spriteFiles[index]);
+		Sprite* sprite = Sprite::Create(
+		    textureHandle,
+		    {windowWidth * 0.5f + contentOffset_.x, pageCenterY + contentOffset_.y},
+		    {1.0f, 1.0f, 1.0f, 0.0f},
+		    {0.5f, 0.5f});
+		sprite->SetSize(contentDisplaySize_);
+		contentSprites_[index] = sprite;
+	}
+	if (static_cast<size_t>(currentPage_) < pageSprites_.size()) {
+		ApplyCurrentPageVisual(currentVisibility_);
+	}
 }
 
 void DialogueSystem::Start() {
 	currentPage_ = 0;
 	phaseTimer_ = 0.0f;
+	advanceIndicatorTimer_ = 0.0f;
 	for (size_t index = 0; index < pageSprites_.size(); ++index) {
 		const Vector4& baseColor = pageBaseColors_[index];
 		pageSprites_[index]->SetColor({baseColor.x, baseColor.y, baseColor.z, 0.0f});
+		if (index < contentSprites_.size() && contentSprites_[index] != nullptr) {
+			contentSprites_[index]->SetColor({1.0f, 1.0f, 1.0f, 0.0f});
+		}
 	}
 	if (pageSprites_.empty()) {
 		phase_ = Phase::kFinished;
@@ -70,6 +123,7 @@ void DialogueSystem::Update() {
 		break;
 	}
 	case Phase::kWaiting:
+		advanceIndicatorTimer_ += kFrameTime;
 		if (Input::GetInstance()->TriggerKey(DIK_SPACE) || Input::GetInstance()->IsTriggerMouse(0) ||
 		    GamepadInput::IsTriggered(GamepadInput::ReadPlayerOne(), XINPUT_GAMEPAD_A)) {
 			phase_ = Phase::kDisappearing;
@@ -93,6 +147,7 @@ void DialogueSystem::Update() {
 		break;
 	}
 	}
+	UpdateAdvanceIndicatorVisual();
 }
 
 void DialogueSystem::ApplyCurrentPageVisual(float visibility) {
@@ -102,13 +157,52 @@ void DialogueSystem::ApplyCurrentPageVisual(float visibility) {
 	const float windowHeight = static_cast<float>(WinApp::kWindowHeight);
 	const float pageHeight = windowHeight * screenHeightRatio_;
 	const Vector4& baseColor = pageBaseColors_[currentPage_];
-	pageSprites_[currentPage_]->SetPosition({0.0f, windowHeight - pageHeight + kSlideDistance * (1.0f - visibility)});
+	const float slideOffset = kSlideDistance * (1.0f - visibility);
+	pageSprites_[currentPage_]->SetPosition({0.0f, windowHeight - pageHeight + slideOffset});
 	pageSprites_[currentPage_]->SetColor({baseColor.x, baseColor.y, baseColor.z, baseColor.w * opacity_ * visibility});
+	if (static_cast<size_t>(currentPage_) < contentSprites_.size() && contentSprites_[currentPage_] != nullptr) {
+		contentSprites_[currentPage_]->SetPosition({
+		    static_cast<float>(WinApp::kWindowWidth) * 0.5f + contentOffset_.x,
+		    windowHeight - pageHeight * 0.5f + contentOffset_.y + slideOffset});
+		contentSprites_[currentPage_]->SetColor({1.0f, 1.0f, 1.0f, opacity_ * visibility});
+	}
+}
+
+void DialogueSystem::UpdateAdvanceIndicatorVisual() {
+	if (phase_ != Phase::kWaiting) {
+		for (Sprite* indicator : advanceIndicators_) {
+			if (indicator != nullptr) { indicator->SetColor({1.0f, 1.0f, 1.0f, 0.0f}); }
+		}
+		return;
+	}
+
+	const float cycle = (std::max)(kAdvanceIndicatorCycleDuration, kFrameTime);
+	const float basePhase =
+	    advanceIndicatorTimer_ / cycle * 2.0f * std::numbers::pi_v<float>;
+	for (std::size_t index = 0; index < advanceIndicators_.size(); ++index) {
+		Sprite* indicator = advanceIndicators_[index];
+		if (indicator == nullptr) { continue; }
+		const float phaseOffset =
+		    static_cast<float>(index) / static_cast<float>(advanceIndicators_.size()) *
+		    2.0f * std::numbers::pi_v<float>;
+		const float jump = (std::max)(0.0f, std::sin(basePhase - phaseOffset));
+		const float horizontalOffset =
+		    (static_cast<float>(index) - 1.0f) * kAdvanceIndicatorSpacing;
+		indicator->SetPosition({
+		    static_cast<float>(WinApp::kWindowWidth) - kAdvanceIndicatorRightPadding +
+		        horizontalOffset,
+		    static_cast<float>(WinApp::kWindowHeight) - kAdvanceIndicatorBottomPadding -
+		        jump * kAdvanceIndicatorMoveAmount});
+		const float indicatorSize = kAdvanceIndicatorSize * (1.0f + jump * 0.10f);
+		indicator->SetSize({indicatorSize, indicatorSize});
+		indicator->SetColor({1.0f, 1.0f, 1.0f, opacity_ * (0.72f + jump * 0.28f)});
+	}
 }
 
 void DialogueSystem::SetOpacity(float opacity) {
 	opacity_ = std::clamp(opacity, 0.0f, 1.0f);
 	if (static_cast<size_t>(currentPage_) < pageSprites_.size()) { ApplyCurrentPageVisual(currentVisibility_); }
+	UpdateAdvanceIndicatorVisual();
 }
 
 void DialogueSystem::SetBaseColor(const Vector4& color) {
@@ -129,10 +223,24 @@ void DialogueSystem::Draw() const {
 	if (!IsActive() || static_cast<size_t>(currentPage_) >= pageSprites_.size()) { return; }
 	Sprite::PreDraw();
 	pageSprites_[currentPage_]->Draw();
+	if (static_cast<size_t>(currentPage_) < contentSprites_.size() && contentSprites_[currentPage_] != nullptr) {
+		contentSprites_[currentPage_]->Draw();
+	}
+	if (phase_ == Phase::kWaiting) {
+		for (Sprite* indicator : advanceIndicators_) {
+			if (indicator != nullptr) { indicator->Draw(); }
+		}
+	}
 	Sprite::PostDraw();
 }
 
 DialogueSystem::~DialogueSystem() {
+	for (Sprite* sprite : contentSprites_) { delete sprite; }
+	contentSprites_.clear();
 	for (Sprite* sprite : pageSprites_) { delete sprite; }
 	pageSprites_.clear();
+	for (Sprite*& indicator : advanceIndicators_) {
+		delete indicator;
+		indicator = nullptr;
+	}
 }

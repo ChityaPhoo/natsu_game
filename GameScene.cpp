@@ -20,6 +20,11 @@ void GameScene::Initialize() {
 	// The title and game share the same world. Starting at the camera center makes
 	// the title-to-play transition continuous instead of repositioning the player.
 	player_->SetPosition({kTitlePlayerX, 2.401f, 0.0f});
+	playerHealthPortrait_ = new Player();
+	playerHealthPortrait_->Initialize();
+	playerHealthPortrait_->SetPosition({0.0f, 2.401f, 0.0f});
+	playerHealthPortraitCamera_.Initialize();
+	playerHealthPortraitCamera_.farZ = 500.0f;
 
 	cameraController_ = new CameraController();
 	cameraController_->Initialize();
@@ -40,6 +45,14 @@ void GameScene::Initialize() {
 	bossArmature_->Initialize();
 	bossArmature_->SetAIEnabled(false);
 	bossArmature_->SetPhaseTwo(false);
+	bossHealthPortrait_ = new BossArmature();
+	bossHealthPortrait_->Initialize();
+	bossHealthPortrait_->SetAIEnabled(false);
+	bossHealthPortrait_->SetPhaseTwo(false);
+	bossHealthPortraitCamera_.Initialize();
+	bossHealthPortraitCamera_.farZ = 500.0f;
+	dialogueSpeakerPortraitCamera_.Initialize();
+	dialogueSpeakerPortraitCamera_.farZ = 500.0f;
 	dialogueSystem_ = new DialogueSystem();
 	dialogueSystem_->Initialize(
 	    kBossDialoguePageCount,
@@ -47,6 +60,13 @@ void GameScene::Initialize() {
 	    0.25f,
 	    {kDialogueBoxCropX, kDialogueBoxCropY},
 	    {kDialogueBoxCropWidth, kDialogueBoxCropHeight});
+	dialogueSystem_->SetPageContentSprites(
+	    {
+	        "dialogue/dia1.png", "dialogue/dia2.png", "dialogue/dia3.png",
+	        "dialogue/dia4.png", "dialogue/dia5.png",
+	    },
+	    {kDialogueContentWidth, kDialogueContentHeight},
+	    {kDialogueContentOffsetX, kDialogueContentOffsetY});
 	phaseDialogueSystem_ = new DialogueSystem();
 	phaseDialogueSystem_->Initialize(
 	    kBossPhaseDialoguePageCount,
@@ -54,6 +74,13 @@ void GameScene::Initialize() {
 	    0.25f,
 	    {kDialogueBoxCropX, kDialogueBoxCropY},
 	    {kDialogueBoxCropWidth, kDialogueBoxCropHeight});
+	phaseDialogueSystem_->SetPageContentSprites(
+	    {
+	        "dialogue/dia6.png", "dialogue/dia7.png", "dialogue/dia8.png",
+	        "dialogue/dia9.png", "dialogue/dia10.png", "dialogue/dia11.png",
+	    },
+	    {kDialogueContentWidth, kDialogueContentHeight},
+	    {kDialogueContentOffsetX, kDialogueContentOffsetY});
 	victoryDialogueSystem_ = new DialogueSystem();
 	victoryDialogueSystem_->Initialize(
 	    1,
@@ -93,6 +120,17 @@ void GameScene::Initialize() {
 	    {0.5f, 0.5f});
 	// Preserve the 252x102 source aspect ratio instead of stretching the logo.
 	titleLogo_->SetSize({500.0f, 202.0f});
+	const Vector2 resultSpritePosition = {
+	    static_cast<float>(WinApp::kWindowWidth) * 0.5f,
+	    static_cast<float>(WinApp::kWindowHeight) * 0.5f};
+	gameOverSprite_ = Sprite::Create(
+	    TextureManager::Load(kGameOverSpriteFile), resultSpritePosition,
+	    {1.0f, 1.0f, 1.0f, 0.0f}, {0.5f, 0.5f});
+	gameOverSprite_->SetSize({kResultSpriteWidth, kResultSpriteHeight});
+	gameClearSprite_ = Sprite::Create(
+	    TextureManager::Load(kGameClearSpriteFile), resultSpritePosition,
+	    {1.0f, 1.0f, 1.0f, 0.0f}, {0.5f, 0.5f});
+	gameClearSprite_->SetSize({kResultSpriteWidth, kResultSpriteHeight});
 	const uint32_t titlePromptTexture = TextureManager::Load(kTitlePromptSpriteFile);
 	titlePromptSprite_ = Sprite::Create(
 	    titlePromptTexture,
@@ -130,6 +168,33 @@ void GameScene::Initialize() {
 	bossHealthFrame_ = Sprite::Create(healthBarTexture, {0.0f, 0.0f}, {0.025f, 0.015f, 0.015f, 0.0f}, {0.5f, 0.5f});
 	bossHealthBackground_ = Sprite::Create(healthBarTexture, {0.0f, 0.0f}, {0.10f, 0.025f, 0.025f, 0.0f}, {0.5f, 0.5f});
 	bossHealthFill_ = Sprite::Create(bossHealthFillTexture, {0.0f, 0.0f}, {1.0f, 1.0f, 1.0f, 0.0f}, {0.0f, 0.5f});
+	const uint32_t characterRingTexture = TextureManager::Load(kCharacterRingSpriteFile);
+	playerHealthRing_ = Sprite::Create(
+	    characterRingTexture, {0.0f, 0.0f}, {1.0f, 1.0f, 1.0f, 0.0f}, {0.5f, 0.5f});
+	playerHealthRing_->SetSize({kPlayerHealthRingSize, kPlayerHealthRingSize});
+	bossHealthRing_ = Sprite::Create(
+	    characterRingTexture, {0.0f, 0.0f}, {1.0f, 1.0f, 1.0f, 0.0f}, {0.5f, 0.5f});
+	bossHealthRing_->SetSize({kBossHealthRingSize, kBossHealthRingSize});
+	dialogueSpeakerRing_ = Sprite::Create(
+	    characterRingTexture, {0.0f, 0.0f}, {1.0f, 1.0f, 1.0f, 0.0f}, {0.5f, 0.5f});
+	dialogueSpeakerRing_->SetSize({kDialogueSpeakerRingSize, kDialogueSpeakerRingSize});
+	playerHealthRingSrt_.translation = {58.5f, 42.0f};
+	playerHealthMiniatureSrt_.translation = {55.0f, 33.5f};
+	playerHealthMiniatureSrt_.rotation = {0.010f, -2.620f, 0.060f};
+	playerHealthMiniatureSrt_.scale = {1.210f, 1.220f, 1.200f};
+	bossHealthRingSrt_.translation = {
+	    79.0f, static_cast<float>(WinApp::kWindowHeight) - 56.0f};
+	bossHealthMiniatureSrt_.translation = {
+	    88.5f, static_cast<float>(WinApp::kWindowHeight) - 27.0f};
+	bossHealthMiniatureSrt_.rotation = {-0.060f, -2.390f, 0.260f};
+	bossHealthMiniatureSrt_.scale = {0.900f, 0.900f, 0.900f};
+	dialogueSpeakerRingSrt_.translation = {
+	    kDialogueSpeakerPositionX, kDialogueSpeakerPositionY};
+	dialogueSpeakerMiniatureSrt_.translation = {
+	    dialogueSpeakerRingSrt_.translation.x + 9.5f,
+	    dialogueSpeakerRingSrt_.translation.y + 29.0f};
+	dialogueSpeakerMiniatureSrt_.rotation = bossHealthMiniatureSrt_.rotation;
+	dialogueSpeakerMiniatureSrt_.scale = bossHealthMiniatureSrt_.scale;
 	blackOverlay_ = Sprite::Create(healthBarTexture, {0.0f, 0.0f}, {0.0f, 0.0f, 0.0f, 0.0f});
 	blackOverlay_->SetSize({static_cast<float>(WinApp::kWindowWidth), static_cast<float>(WinApp::kWindowHeight)});
 	whiteFlashOverlay_ = Sprite::Create(healthBarTexture, {0.0f, 0.0f}, {1.0f, 1.0f, 1.0f, 0.0f});
@@ -143,6 +208,8 @@ void GameScene::Initialize() {
 	bossPhaseState_ = BossPhaseState::kPhaseOne;
 	titleFadeTimer_ = 0.0f;
 	titleIdleTimer_ = 0.0f;
+	titleStartBlinkTimer_ = 0.0f;
+	moonAnimationTimer_ = 0.0f;
 	gameplayUiIdleTimer_ = 0.0f;
 	titleCoverAlpha_ = 1.0f;
 	healthBarAppearTimer_ = 0.0f;
@@ -155,8 +222,11 @@ void GameScene::Initialize() {
 	bossHealth_ = bossMaximumHealth_;
 	playerHealthRatio_ = 1.0f;
 	bossHealthRatio_ = 1.0f;
+	displayedPlayerHealthRatio_ = 1.0f;
+	displayedBossHealthRatio_ = 1.0f;
 	healthBarsVisible_ = false;
 	playerAttackHitBoss_ = false;
+	throwHitApplied_ = false;
 	showBossRangeVisual_ = false;
 	showCollisionDebug_ = false;
 	restartToTitleRequested_ = false;
@@ -171,6 +241,8 @@ void GameScene::Initialize() {
 
 void GameScene::Update() {
 	player_->UpdateIdleAnimation();
+	playerHealthPortrait_->UpdateIdleAnimation();
+	bossHealthPortrait_->Update({bossHealthPortrait_->GetPosition().x - 10.0f, 2.401f, 0.0f});
 	if (flowState_ != FlowState::kPlay) {
 		cameraController_->SetDebugMode(false, {});
 		UpdateTitle();
@@ -283,6 +355,8 @@ bool GameScene::Overlaps(
 void GameScene::UpdateCombatCollisions() {
 	damageInvincibilityTimer_ = (std::max)(0.0f, damageInvincibilityTimer_ - kFrameTime);
 	const BossArmature::CollisionBox bossBody = bossArmature_->GetBodyHitbox();
+	const bool throwInProgress = bossArmature_->IsScytheThrowInProgress();
+	if (!throwInProgress) { throwHitApplied_ = false; }
 
 	if (!player_->IsAttackActive()) {
 		playerAttackHitBoss_ = false;
@@ -351,12 +425,14 @@ void GameScene::UpdateCombatCollisions() {
 			break;
 		}
 	}
-	const bool weaponHit = bossArmature_->IsScytheAttackActive() && !hookActive && !jumpSlamActive && [&]() {
+	const bool weaponHit = bossArmature_->IsScytheAttackActive() && !hookActive && !jumpSlamActive &&
+	                       !(throwInProgress && throwHitApplied_) && [&]() {
 		const BossArmature::CollisionBox scythe = bossArmature_->GetScytheHitbox();
 		return Overlaps(playerBody.min, playerBody.max, scythe.min, scythe.max);
 	}();
 	const bool bodyHit = bossArmature_->IsBodyAttackActive() && Overlaps(playerBody.min, playerBody.max, bossBody.min, bossBody.max);
 	if (!jumpSlamHit && !groundWaveHit && !shadowPillarHit && !weaponHit && !bodyHit) { return; }
+	if (weaponHit && throwInProgress) { throwHitApplied_ = true; }
 
 	const int damage = jumpSlamHit ? kJumpSlamDamage
 	                   : groundWaveHit ? kPhaseTwoGroundWaveDamage
@@ -398,8 +474,8 @@ void GameScene::StartPlayerDefeat() {
 	endPhaseTimer_ = 0.0f;
 	slowMotionFrameCounter_ = 0;
 	bossArmature_->SetAIEnabled(false);
-	titleLogo_->SetPosition({static_cast<float>(WinApp::kWindowWidth) * 0.5f, static_cast<float>(WinApp::kWindowHeight) * 0.5f});
-	titleLogo_->SetColor({1.0f, 1.0f, 1.0f, 0.0f});
+	gameOverSprite_->SetColor({1.0f, 1.0f, 1.0f, 0.0f});
+	gameClearSprite_->SetColor({1.0f, 1.0f, 1.0f, 0.0f});
 	blackOverlayAlpha_ = 0.0f;
 	whiteFlashAlpha_ = 0.0f;
 	resultContinueRequested_ = false;
@@ -419,8 +495,8 @@ void GameScene::StartBossDefeat() {
 	blackOverlayAlpha_ = 0.0f;
 	whiteFlashAlpha_ = 0.0f;
 	resultContinueRequested_ = false;
-	titleLogo_->SetPosition({static_cast<float>(WinApp::kWindowWidth) * 0.5f, static_cast<float>(WinApp::kWindowHeight) * 0.5f});
-	titleLogo_->SetColor({1.0f, 1.0f, 1.0f, 0.0f});
+	gameOverSprite_->SetColor({1.0f, 1.0f, 1.0f, 0.0f});
+	gameClearSprite_->SetColor({1.0f, 1.0f, 1.0f, 0.0f});
 	SpawnBossDefeatParticles();
 }
 
@@ -499,7 +575,8 @@ void GameScene::UpdateEndSequence() {
 	case EndPhase::kLogoFadeIn: {
 		endPhaseTimer_ = (std::min)(endPhaseTimer_ + kFrameTime, kResultLogoFadeInDuration);
 		const float alpha = SmoothStep(endPhaseTimer_ / kResultLogoFadeInDuration);
-		titleLogo_->SetColor({1.0f, 1.0f, 1.0f, alpha});
+		Sprite* resultSprite = endType_ == EndType::kPlayerDefeat ? gameOverSprite_ : gameClearSprite_;
+		resultSprite->SetColor({1.0f, 1.0f, 1.0f, alpha});
 		blackOverlayAlpha_ = 1.0f;
 		if (endPhaseTimer_ >= kResultLogoFadeInDuration) {
 			endPhase_ = EndPhase::kLogoWait;
@@ -518,7 +595,8 @@ void GameScene::UpdateEndSequence() {
 	case EndPhase::kLogoFadeOut: {
 		endPhaseTimer_ = (std::min)(endPhaseTimer_ + kFrameTime, kResultLogoFadeOutDuration);
 		const float alpha = 1.0f - SmoothStep(endPhaseTimer_ / kResultLogoFadeOutDuration);
-		titleLogo_->SetColor({1.0f, 1.0f, 1.0f, alpha});
+		Sprite* resultSprite = endType_ == EndType::kPlayerDefeat ? gameOverSprite_ : gameClearSprite_;
+		resultSprite->SetColor({1.0f, 1.0f, 1.0f, alpha});
 		if (endPhaseTimer_ >= kResultLogoFadeOutDuration) { restartToTitleRequested_ = true; }
 		break;
 	}
@@ -579,6 +657,20 @@ void GameScene::StartHealthBarEntrance() {
 
 void GameScene::UpdateHealthBars() {
 	if (!healthBarsVisible_) { return; }
+	const float drainBlend = 1.0f - std::exp(-kHealthBarDrainEaseSpeed * kFrameTime);
+	auto updateDisplayedRatio = [drainBlend](float& displayed, float target) {
+		target = std::clamp(target, 0.0f, 1.0f);
+		// Refills remain immediate, while damage drains toward the new value with
+		// an exponential ease that is stable even if frame rate varies later.
+		if (target >= displayed) {
+			displayed = target;
+		} else {
+			displayed = std::lerp(displayed, target, drainBlend);
+			if (displayed - target < 0.001f) { displayed = target; }
+		}
+	};
+	updateDisplayedRatio(displayedPlayerHealthRatio_, playerHealthRatio_);
+	updateDisplayedRatio(displayedBossHealthRatio_, bossHealthRatio_);
 
 	healthBarAppearTimer_ = (std::min)(healthBarAppearTimer_ + kFrameTime, kHealthBarAppearDuration);
 	const float t = healthBarAppearTimer_ / kHealthBarAppearDuration;
@@ -586,7 +678,7 @@ void GameScene::UpdateHealthBars() {
 	const float windowWidth = static_cast<float>(WinApp::kWindowWidth);
 	const float windowHeight = static_cast<float>(WinApp::kWindowHeight);
 
-	const float playerX = -360.0f + (36.0f + 360.0f) * easedT;
+	const float playerX = -360.0f + (96.0f + 360.0f) * easedT;
 	constexpr float playerY = 42.0f;
 	constexpr float playerFrameWidth = 350.0f;
 	constexpr float playerBarWidth = 336.0f;
@@ -595,7 +687,7 @@ void GameScene::UpdateHealthBars() {
 	playerHealthBackground_->SetPosition({playerX + 7.0f, playerY});
 	playerHealthBackground_->SetSize({playerBarWidth, 10.0f});
 	playerHealthFill_->SetPosition({playerX + 7.0f, playerY});
-	playerHealthFill_->SetSize({playerBarWidth * std::clamp(playerHealthRatio_, 0.0f, 1.0f), 10.0f});
+	playerHealthFill_->SetSize({playerBarWidth * displayedPlayerHealthRatio_, 10.0f});
 
 	const float bossY = windowHeight + 36.0f + ((windowHeight - 56.0f) - (windowHeight + 36.0f)) * easedT;
 	constexpr float bossFrameWidth = 1040.0f;
@@ -605,7 +697,32 @@ void GameScene::UpdateHealthBars() {
 	bossHealthBackground_->SetPosition({windowWidth * 0.5f, bossY});
 	bossHealthBackground_->SetSize({bossBarWidth, 10.0f});
 	bossHealthFill_->SetPosition({windowWidth * 0.5f - bossBarWidth * 0.5f, bossY});
-	bossHealthFill_->SetSize({bossBarWidth * std::clamp(bossHealthRatio_, 0.0f, 1.0f), 10.0f});
+	bossHealthFill_->SetSize({bossBarWidth * displayedBossHealthRatio_, 10.0f});
+
+	const float playerRingX = -kPlayerHealthRingSize * 0.5f +
+	                          (playerHealthRingSrt_.translation.x + kPlayerHealthRingSize * 0.5f) * easedT;
+	const Vector2 playerRingPosition = {playerRingX, playerHealthRingSrt_.translation.y};
+	const float playerMiniatureX = -kPlayerHealthRingSize * 0.5f +
+	                               (playerHealthMiniatureSrt_.translation.x + kPlayerHealthRingSize * 0.5f) * easedT;
+	const Vector2 playerMiniaturePosition = {
+	    playerMiniatureX, playerHealthMiniatureSrt_.translation.y};
+	const float bossRingY = windowHeight + 36.0f +
+	                        (bossHealthRingSrt_.translation.y - (windowHeight + 36.0f)) * easedT;
+	const Vector2 bossRingPosition = {bossHealthRingSrt_.translation.x, bossRingY};
+	const float bossMiniatureY = windowHeight + 36.0f +
+	                             (bossHealthMiniatureSrt_.translation.y - (windowHeight + 36.0f)) * easedT;
+	const Vector2 bossMiniaturePosition = {
+	    bossHealthMiniatureSrt_.translation.x, bossMiniatureY};
+	playerHealthRing_->SetPosition(playerRingPosition);
+	bossHealthRing_->SetPosition(bossRingPosition);
+	playerHealthRing_->SetRotation(playerHealthRingSrt_.rotation);
+	bossHealthRing_->SetRotation(bossHealthRingSrt_.rotation);
+	playerHealthRing_->SetSize({
+	    kPlayerHealthRingSize * playerHealthRingSrt_.scale.x,
+	    kPlayerHealthRingSize * playerHealthRingSrt_.scale.y});
+	bossHealthRing_->SetSize({
+	    kBossHealthRingSize * bossHealthRingSrt_.scale.x,
+	    kBossHealthRingSize * bossHealthRingSrt_.scale.y});
 
 	playerHealthFrame_->SetColor({0.03f, 0.02f, 0.02f, 0.96f * easedT});
 	playerHealthBackground_->SetColor({0.025f, 0.09f, 0.035f, 0.94f * easedT});
@@ -613,10 +730,40 @@ void GameScene::UpdateHealthBars() {
 	bossHealthFrame_->SetColor({0.025f, 0.015f, 0.015f, 0.96f * easedT});
 	bossHealthBackground_->SetColor({0.10f, 0.025f, 0.025f, 0.94f * easedT});
 	bossHealthFill_->SetColor({1.0f, 1.0f, 1.0f, easedT});
+	playerHealthRing_->SetColor({1.0f, 1.0f, 1.0f, easedT});
+	bossHealthRing_->SetColor({1.0f, 1.0f, 1.0f, easedT});
+
+	Vector3 playerPortraitCenter = playerHealthPortrait_->GetWorldTransform().translation_;
+	playerPortraitCenter.y += 0.10f;
+	const Vector3 bossPortraitCenter = bossHealthPortrait_->GetHeadPortraitCenter();
+	UpdateHealthPortraitCamera(
+	    playerHealthPortraitCamera_, playerPortraitCenter,
+	    playerMiniaturePosition, kPlayerPortraitCameraDistance);
+	UpdateHealthPortraitCamera(
+	    bossHealthPortraitCamera_, bossPortraitCenter,
+	    bossMiniaturePosition, kBossPortraitCameraDistance);
+}
+
+void GameScene::UpdateHealthPortraitCamera(
+    Camera& camera, const Vector3& modelCenter, const Vector2& screenCenter,
+    float distance) {
+	const float windowWidth = static_cast<float>(WinApp::kWindowWidth);
+	const float windowHeight = static_cast<float>(WinApp::kWindowHeight);
+	const float normalizedX = screenCenter.x / windowWidth * 2.0f - 1.0f;
+	const float normalizedY = 1.0f - screenCenter.y / windowHeight * 2.0f;
+	const float safeDistance = (std::max)(distance, camera.nearZ + 0.1f);
+	const float halfHeight = std::tan(camera.fovAngleY * 0.5f) * safeDistance;
+	const float halfWidth = halfHeight * camera.aspectRatio;
+	camera.rotation_ = {};
+	camera.translation_ = {
+	    modelCenter.x - normalizedX * halfWidth,
+	    modelCenter.y - normalizedY * halfHeight,
+	    modelCenter.z - safeDistance};
+	camera.UpdateMatrix();
 }
 
 void GameScene::DrawHealthBars() const {
-	if (!healthBarsVisible_) { return; }
+	if (!healthBarsVisible_ || bossPhaseState_ == BossPhaseState::kDialogue) { return; }
 
 	Sprite::PreDraw();
 	playerHealthFrame_->Draw();
@@ -625,7 +772,113 @@ void GameScene::DrawHealthBars() const {
 	bossHealthFrame_->Draw();
 	bossHealthBackground_->Draw();
 	bossHealthFill_->Draw();
+	playerHealthRing_->Draw();
+	bossHealthRing_->Draw();
 	Sprite::PostDraw();
+
+	Model::PreDraw(
+	    Model::CullingMode::kNone, Model::BlendMode::kNormal,
+	    Model::DepthTestMode::kOn);
+	const Vector3 playerPortraitScale = {
+	    playerHealthMiniatureSrt_.scale.x * kPlayerPortraitBaseScale,
+	    playerHealthMiniatureSrt_.scale.y * kPlayerPortraitBaseScale,
+	    playerHealthMiniatureSrt_.scale.z * kPlayerPortraitBaseScale};
+	playerHealthPortrait_->SetPortraitOpacity(1.0f);
+	playerHealthPortrait_->DrawPortrait(
+	    playerHealthPortraitCamera_, playerHealthMiniatureSrt_.rotation,
+	    playerPortraitScale);
+	bossHealthPortrait_->SetModelOpacity(1.0f);
+	const Vector3 bossPortraitScale = {
+	    bossHealthMiniatureSrt_.scale.x * kBossPortraitBaseScale,
+	    bossHealthMiniatureSrt_.scale.y * kBossPortraitBaseScale,
+	    bossHealthMiniatureSrt_.scale.z * kBossPortraitBaseScale};
+	bossHealthPortrait_->DrawHeadPortrait(
+	    bossHealthPortraitCamera_, bossHealthMiniatureSrt_.rotation,
+	    bossPortraitScale);
+	Model::PostDraw();
+}
+
+void GameScene::DrawDialogueSpeaker() {
+	DialogueSystem* activeDialogue = nullptr;
+	bool isPhaseDialogue = false;
+	if (dialogueSystem_ != nullptr && dialogueSystem_->IsActive()) {
+		activeDialogue = dialogueSystem_;
+	} else if (phaseDialogueSystem_ != nullptr && phaseDialogueSystem_->IsActive()) {
+		activeDialogue = phaseDialogueSystem_;
+		isPhaseDialogue = true;
+	}
+	if (activeDialogue == nullptr) { return; }
+
+	const uint32_t page = activeDialogue->GetCurrentPage();
+	const bool isPlayerSpeaker = isPhaseDialogue ? (page == 2 || page == 4) : page == 3;
+	RingSrt speakerRingSrt = dialogueSpeakerRingSrt_;
+	MiniatureSrt speakerMiniatureSrt = dialogueSpeakerMiniatureSrt_;
+	float ringBaseSize = kDialogueSpeakerRingSize;
+	if (isPlayerSpeaker) {
+		const Vector2 playerMiniatureOffset = {
+		    playerHealthMiniatureSrt_.translation.x - playerHealthRingSrt_.translation.x,
+		    playerHealthMiniatureSrt_.translation.y - playerHealthRingSrt_.translation.y};
+		speakerRingSrt.rotation = playerHealthRingSrt_.rotation;
+		speakerRingSrt.scale = playerHealthRingSrt_.scale;
+		speakerMiniatureSrt.translation = {
+		    speakerRingSrt.translation.x + playerMiniatureOffset.x,
+		    speakerRingSrt.translation.y + playerMiniatureOffset.y};
+		speakerMiniatureSrt.rotation = playerHealthMiniatureSrt_.rotation;
+		speakerMiniatureSrt.scale = playerHealthMiniatureSrt_.scale;
+		ringBaseSize = kPlayerHealthRingSize;
+	}
+
+	const float visibility = activeDialogue->GetCurrentVisibility();
+	const Vector2 speakerPosition = {
+	    speakerRingSrt.translation.x,
+	    speakerRingSrt.translation.y + activeDialogue->GetCurrentSlideOffset()};
+	const Vector2 speakerMiniaturePosition = {
+	    speakerMiniatureSrt.translation.x,
+	    speakerMiniatureSrt.translation.y + activeDialogue->GetCurrentSlideOffset()};
+	dialogueSpeakerRing_->SetPosition(speakerPosition);
+	dialogueSpeakerRing_->SetRotation(speakerRingSrt.rotation);
+	dialogueSpeakerRing_->SetSize({
+	    ringBaseSize * speakerRingSrt.scale.x,
+	    ringBaseSize * speakerRingSrt.scale.y});
+	dialogueSpeakerRing_->SetColor({1.0f, 1.0f, 1.0f, visibility});
+	if (isPlayerSpeaker) {
+		Vector3 playerPortraitCenter = playerHealthPortrait_->GetWorldTransform().translation_;
+		playerPortraitCenter.y += 0.10f;
+		UpdateHealthPortraitCamera(
+		    dialogueSpeakerPortraitCamera_, playerPortraitCenter,
+		    speakerMiniaturePosition, kPlayerPortraitCameraDistance);
+	} else {
+		UpdateHealthPortraitCamera(
+		    dialogueSpeakerPortraitCamera_, bossHealthPortrait_->GetHeadPortraitCenter(),
+		    speakerMiniaturePosition, kBossPortraitCameraDistance);
+	}
+
+	Sprite::PreDraw();
+	dialogueSpeakerRing_->Draw();
+	Sprite::PostDraw();
+	Model::PreDraw(
+	    Model::CullingMode::kNone, Model::BlendMode::kNormal,
+	    Model::DepthTestMode::kOn);
+	if (isPlayerSpeaker) {
+		playerHealthPortrait_->SetPortraitOpacity(visibility);
+		const Vector3 speakerPortraitScale = {
+		    speakerMiniatureSrt.scale.x * kPlayerPortraitBaseScale,
+		    speakerMiniatureSrt.scale.y * kPlayerPortraitBaseScale,
+		    speakerMiniatureSrt.scale.z * kPlayerPortraitBaseScale};
+		playerHealthPortrait_->DrawPortrait(
+		    dialogueSpeakerPortraitCamera_, speakerMiniatureSrt.rotation,
+		    speakerPortraitScale);
+	} else {
+		bossHealthPortrait_->SetModelOpacity(visibility);
+		const Vector3 speakerPortraitScale = {
+		    speakerMiniatureSrt.scale.x * kBossPortraitBaseScale,
+		    speakerMiniatureSrt.scale.y * kBossPortraitBaseScale,
+		    speakerMiniatureSrt.scale.z * kBossPortraitBaseScale};
+		bossHealthPortrait_->DrawHeadPortrait(
+		    dialogueSpeakerPortraitCamera_, speakerMiniatureSrt.rotation,
+		    speakerPortraitScale);
+	}
+	Model::PostDraw();
 }
 
 void GameScene::DrawBossRangeVisual() {
@@ -810,7 +1063,8 @@ void GameScene::DrawEndOverlay() const {
 	if (whiteFlashAlpha_ > 0.0f) { whiteFlashOverlay_->Draw(); }
 	if (blackOverlayAlpha_ > 0.0f) { blackOverlay_->Draw(); }
 	if (endPhase_ == EndPhase::kLogoFadeIn || endPhase_ == EndPhase::kLogoWait || endPhase_ == EndPhase::kLogoFadeOut) {
-		titleLogo_->Draw();
+		Sprite* resultSprite = endType_ == EndType::kPlayerDefeat ? gameOverSprite_ : gameClearSprite_;
+		resultSprite->Draw();
 	}
 	Sprite::PostDraw();
 }
@@ -838,6 +1092,52 @@ void GameScene::DrawCombatImGui() {
 			bossHealthRatio_ = 1.0f;
 		}
 		ImGui::TextUnformatted("Changing max HP refills that health bar.");
+	}
+	if (ImGui::CollapsingHeader("Miniature and Ring SRT", ImGuiTreeNodeFlags_DefaultOpen)) {
+		ImGui::TextUnformatted("Translation is in screen pixels. Rotation is in radians.");
+		auto editSrt = [](const char* label, RingSrt& ring, MiniatureSrt& miniature) {
+			ImGui::PushID(label);
+			if (ImGui::TreeNodeEx(label, ImGuiTreeNodeFlags_DefaultOpen)) {
+				ImGui::DragFloat2("Ring Translation", &ring.translation.x, 0.5f, -2000.0f, 2000.0f, "%.1f px");
+				ImGui::DragFloat("Ring Rotation", &ring.rotation, 0.01f, -6.283f, 6.283f, "%.3f rad");
+				ImGui::DragFloat2("Ring Scale", &ring.scale.x, 0.01f, 0.05f, 5.0f, "%.3f");
+				ImGui::SeparatorText("Miniature");
+				ImGui::DragFloat2("Translation", &miniature.translation.x, 0.5f, -2000.0f, 2000.0f, "%.1f px");
+				ImGui::DragFloat3("Rotation", &miniature.rotation.x, 0.01f, -6.283f, 6.283f, "%.3f rad");
+				ImGui::DragFloat3("Scale", &miniature.scale.x, 0.01f, 0.05f, 5.0f, "%.3f");
+				ImGui::TreePop();
+			}
+			ImGui::PopID();
+		};
+		editSrt("Player HP", playerHealthRingSrt_, playerHealthMiniatureSrt_);
+		editSrt("Boss HP", bossHealthRingSrt_, bossHealthMiniatureSrt_);
+		editSrt("Boss Dialogue Speaker", dialogueSpeakerRingSrt_, dialogueSpeakerMiniatureSrt_);
+		ImGui::TextWrapped("Player dialogue pages inherit the Player HP ring and miniature SRT.");
+		if (ImGui::Button("Reset all miniature SRT")) {
+			playerHealthRingSrt_ = {};
+			playerHealthRingSrt_.translation = {58.5f, 42.0f};
+			playerHealthMiniatureSrt_ = {};
+			playerHealthMiniatureSrt_.translation = {55.0f, 33.5f};
+			playerHealthMiniatureSrt_.rotation = {0.010f, -2.620f, 0.060f};
+			playerHealthMiniatureSrt_.scale = {1.210f, 1.220f, 1.200f};
+			bossHealthRingSrt_ = {};
+			bossHealthRingSrt_.translation = {
+			    79.0f, static_cast<float>(WinApp::kWindowHeight) - 56.0f};
+			bossHealthMiniatureSrt_ = {};
+			bossHealthMiniatureSrt_.translation = {
+			    88.5f, static_cast<float>(WinApp::kWindowHeight) - 27.0f};
+			bossHealthMiniatureSrt_.rotation = {-0.060f, -2.390f, 0.260f};
+			bossHealthMiniatureSrt_.scale = {0.900f, 0.900f, 0.900f};
+			dialogueSpeakerRingSrt_ = {};
+			dialogueSpeakerRingSrt_.translation = {
+			    kDialogueSpeakerPositionX, kDialogueSpeakerPositionY};
+			dialogueSpeakerMiniatureSrt_ = {};
+			dialogueSpeakerMiniatureSrt_.translation = {
+			    dialogueSpeakerRingSrt_.translation.x + 9.5f,
+			    dialogueSpeakerRingSrt_.translation.y + 29.0f};
+			dialogueSpeakerMiniatureSrt_.rotation = bossHealthMiniatureSrt_.rotation;
+			dialogueSpeakerMiniatureSrt_.scale = bossHealthMiniatureSrt_.scale;
+		}
 	}
 	ImGui::Text("Damage: Player %d | Body %d | Weapon %d", kPlayerAttackDamage, kBossBodyDamage, kScytheDamage);
 	ImGui::Text("Phase 2: Wave %d | Pillar %d", kPhaseTwoGroundWaveDamage, kPhaseTwoPillarDamage);
@@ -946,20 +1246,29 @@ void GameScene::UpdateTitle() {
 		    GamepadInput::IsTriggered(GamepadInput::ReadPlayerOne(), XINPUT_GAMEPAD_A)) {
 			flowState_ = FlowState::kTitleFadeOut;
 			titleFadeTimer_ = 0.0f;
+			titleStartBlinkTimer_ = 0.0f;
+			// Blink the input prompt out on the same frame as the button press.
+			titlePromptSprite_->SetColor({1.0f, 1.0f, 1.0f, 0.0f});
 		}
 		break;
 	case FlowState::kTitleFadeOut: {
 		updateIdleMovement();
+		titleStartBlinkTimer_ = (std::min)(
+		    titleStartBlinkTimer_ + kFrameTime, kTitleStartBlinkDuration);
 		const float progress = SmoothStep(advanceTimer(kTitleStartFadeOutDuration));
-		titleLogo_->SetColor({1.0f, 1.0f, 1.0f, 1.0f - progress});
-		titlePromptSprite_->SetColor({1.0f, 1.0f, 1.0f, 1.0f - progress});
+		const float fadeAlpha = 1.0f - progress;
+		const bool blinkHidden =
+		    titleStartBlinkTimer_ < kTitleStartBlinkDuration &&
+		    static_cast<int>(titleStartBlinkTimer_ / kTitleStartBlinkInterval) % 2 == 0;
+		titleLogo_->SetColor({1.0f, 1.0f, 1.0f, fadeAlpha});
+		titlePromptSprite_->SetColor({
+		    1.0f, 1.0f, 1.0f, blinkHidden ? 0.0f : fadeAlpha});
 		if (titleFadeTimer_ >= (std::max)(kTitleStartFadeOutDuration, kFrameTime)) { flowState_ = FlowState::kPlay; }
 		break;
 	}
 	case FlowState::kPlay:
 		break;
 	}
-
 	mapChipField_->Update();
 	skydome_->Update(cameraController_->GetCamera());
 	UpdateBackgroundSprites();
@@ -986,6 +1295,12 @@ void GameScene::DrawTitleSequence() const {
 
 void GameScene::UpdateBackgroundSprites() {
 	if (backgroundSprites_[0] == nullptr || backgroundSprites_.back() == nullptr) { return; }
+	moonAnimationTimer_ += kFrameTime;
+	const float moonCycle = (std::max)(kMoonScaleCycleDuration, kFrameTime);
+	const float moonPulse = std::sin(
+	    moonAnimationTimer_ / moonCycle * 2.0f * std::numbers::pi_v<float>);
+	const float moonScale = 1.0f + moonPulse * kMoonScaleAmount;
+	moonSprite_->SetSize({kMoonWidth * moonScale, kMoonHeight * moonScale});
 	const Camera& camera = cameraController_->GetCamera();
 	const float pixelsPerWorldX = static_cast<float>(WinApp::kWindowWidth) / (kCameraViewHalfWidth * 2.0f);
 	const float scrollPixels =
@@ -1066,6 +1381,9 @@ void GameScene::Draw() {
 	if (flowState_ == FlowState::kPlay) { DrawHealthBars(); }
 	if (flowState_ == FlowState::kPlay && dialogueSystem_ != nullptr) { dialogueSystem_->Draw(); }
 	if (flowState_ == FlowState::kPlay && phaseDialogueSystem_ != nullptr) { phaseDialogueSystem_->Draw(); }
+	// Draw the active speaker last so the phase-two panel cannot cover its ring
+	// or miniature. This now matches the first-encounter dialogue layering.
+	if (flowState_ == FlowState::kPlay) { DrawDialogueSpeaker(); }
 	if (flowState_ == FlowState::kPlay && victoryDialogueSystem_ != nullptr) { victoryDialogueSystem_->Draw(); }
 	DrawTitleSequence();
 	DrawEndOverlay();
@@ -1081,9 +1399,12 @@ GameScene::~GameScene() {
 	delete bossHealthFill_;
 	delete bossHealthBackground_;
 	delete bossHealthFrame_;
+	delete bossHealthRing_;
+	delete dialogueSpeakerRing_;
 	delete playerHealthFill_;
 	delete playerHealthBackground_;
 	delete playerHealthFrame_;
+	delete playerHealthRing_;
 	delete moonSprite_;
 	for (Sprite*& backgroundSprite : backgroundSprites_) {
 		delete backgroundSprite;
@@ -1092,6 +1413,8 @@ GameScene::~GameScene() {
 	delete gameplayUiTwoSprite_;
 	delete gameplayUiOneSprite_;
 	delete titlePromptSprite_;
+	delete gameClearSprite_;
+	delete gameOverSprite_;
 	delete titleLogo_;
 	delete titleCoverSprite_;
 	delete introSprite_;
@@ -1101,9 +1424,11 @@ GameScene::~GameScene() {
 	delete victoryDialogueSystem_;
 	delete phaseDialogueSystem_;
 	delete dialogueSystem_;
+	delete bossHealthPortrait_;
 	delete bossArmature_;
 	delete skydome_;
 	delete cameraController_;
+	delete playerHealthPortrait_;
 	delete player_;
 	delete mapChipField_;
 }

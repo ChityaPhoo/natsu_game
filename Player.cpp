@@ -10,9 +10,12 @@ using namespace KamataEngine;
 void Player::Initialize() {
 	worldTransform_.Initialize();
 	visualTransform_.Initialize();
+	portraitTransform_.Initialize();
+	portraitColor_.Initialize();
+	portraitColor_.SetColor({1.0f, 1.0f, 1.0f, 1.0f});
 	attackEffectTransform_.Initialize();
 	model_ = Model::CreateFromOBJ("player", true);
-	attackEffectModel_ = Model::CreateFromOBJ("hit_effect", true);
+	attackEffectModel_ = Model::CreateFromOBJ("sword", true);
 	velocity_ = {};
 	onGround_ = false;
 	jumpsRemaining_ = 2;
@@ -92,7 +95,7 @@ void Player::Update() {
 			attackPhase_ = AttackPhase::kCharge;
 			actionTimer_ = 0.0f;
 			velocity_.x = 0.0f;
-			isAttackEffectVisible_ = false;
+			isAttackEffectVisible_ = true;
 			if (!onGround_) { canAirAttack_ = false; }
 		} else if (dashTriggered && dashCooldownTimer_ <= 0.0f && (onGround_ || canAirDash_)) {
 			actionState_ = ActionState::kDash;
@@ -174,7 +177,7 @@ void Player::Update() {
 			const float t = actionTimer_ / kAttackChargeTime;
 			worldTransform_.scale_.z = EaseOut(1.0f, 0.3f, t);
 			worldTransform_.scale_.y = EaseOut(1.0f, 1.6f, t);
-			isAttackEffectVisible_ = false;
+			isAttackEffectVisible_ = true;
 		} else if (actionTimer_ < strikeEnd) {
 			attackPhase_ = AttackPhase::kStrike;
 			const float t = (actionTimer_ - chargeEnd) / kAttackStrikeTime;
@@ -318,11 +321,29 @@ void Player::UpdateWorldMatrix() {
 void Player::UpdateAttackEffectTransform() {
 	if (!isAttackEffectVisible_) { return; }
 
-	const float offsetX = currentDirection_ == LRDirection::kRight ? kAttackEffectOffsetX : -kAttackEffectOffsetX;
+	const float facing = currentDirection_ == LRDirection::kRight ? 1.0f : -1.0f;
+	const float offsetX = facing * kAttackEffectOffsetX;
 	attackEffectTransform_.translation_ = worldTransform_.translation_;
 	attackEffectTransform_.translation_.x += offsetX;
 	attackEffectTransform_.translation_.y += kAttackEffectOffsetY;
-	attackEffectTransform_.rotation_ = worldTransform_.rotation_;
+
+	// The sword is authored upright with its grip at the model origin. Swing it
+	// around that grip: a short wind-up, a quick cutting arc, then a small settle.
+	// Reversing the Z angle mirrors the same motion when the player faces left.
+	const float chargeEnd = kAttackChargeTime;
+	const float strikeEnd = chargeEnd + kAttackStrikeTime;
+	float swingAngle = kSwordRestAngle;
+	if (actionTimer_ < chargeEnd) {
+		const float t = SmoothStep(actionTimer_ / kAttackChargeTime);
+		swingAngle = std::lerp(kSwordRestAngle, kSwordWindUpAngle, t);
+	} else if (actionTimer_ < strikeEnd) {
+		const float t = SmoothStep((actionTimer_ - chargeEnd) / kAttackStrikeTime);
+		swingAngle = std::lerp(kSwordWindUpAngle, kSwordStrikeAngle, t);
+	} else {
+		const float t = SmoothStep((actionTimer_ - strikeEnd) / kAttackRecoveryTime);
+		swingAngle = std::lerp(kSwordStrikeAngle, kSwordRecoveryAngle, t);
+	}
+	attackEffectTransform_.rotation_ = {0.0f, 0.0f, facing * swingAngle};
 	attackEffectTransform_.scale_ = {kAttackEffectScale, kAttackEffectScale, kAttackEffectScale};
 	attackEffectTransform_.matWorld_ = Matrix4x4Calculation::MakeAffineMatrix(
 	    attackEffectTransform_.scale_, attackEffectTransform_.rotation_, attackEffectTransform_.translation_);
@@ -370,6 +391,11 @@ float Player::EaseOut(float start, float end, float t) {
 	return std::lerp(start, end, easedT);
 }
 
+float Player::SmoothStep(float t) {
+	t = std::clamp(t, 0.0f, 1.0f);
+	return t * t * (3.0f - 2.0f * t);
+}
+
 void Player::Draw(const Camera& camera) {
 	if (model_ == nullptr) { return; }
 	visualTransform_.translation_ = worldTransform_.translation_;
@@ -398,6 +424,33 @@ void Player::Draw(const Camera& camera) {
 	if (isAttackEffectVisible_ && attackEffectModel_ != nullptr) {
 		attackEffectModel_->Draw(attackEffectTransform_, camera);
 	}
+}
+
+void Player::DrawPortrait(
+    const Camera& camera, const Vector3& rotationOffset,
+    const Vector3& scaleMultiplier) {
+	if (model_ == nullptr) { return; }
+	portraitTransform_.translation_ = worldTransform_.translation_;
+	// Portraits always face left like the boss portrait. Gameplay turning is not
+	// inherited here, so the HP icon cannot unexpectedly flip or expose the blank
+	// back of the helmet as the player moves.
+	portraitTransform_.rotation_ = {
+	    rotationOffset.x,
+	    -std::numbers::pi_v<float> * 0.5f + rotationOffset.y,
+	    rotationOffset.z};
+	portraitTransform_.scale_ = {
+	    worldTransform_.scale_.x * scaleMultiplier.x,
+	    worldTransform_.scale_.y * scaleMultiplier.y,
+	    worldTransform_.scale_.z * scaleMultiplier.z};
+	portraitTransform_.matWorld_ = Matrix4x4Calculation::MakeAffineMatrix(
+	    portraitTransform_.scale_, portraitTransform_.rotation_, portraitTransform_.translation_);
+	portraitTransform_.TransferMatrix();
+	model_->Draw(portraitTransform_, camera, &portraitColor_);
+}
+
+void Player::SetPortraitOpacity(float opacity) {
+	opacity = std::clamp(opacity, 0.0f, 1.0f);
+	portraitColor_.SetColor({1.0f, 1.0f, 1.0f, opacity});
 }
 
 void Player::DrawDashCooldownMeter(const Camera& camera) const {

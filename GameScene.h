@@ -49,6 +49,16 @@ private:
 		float initialScale = 0.1f;
 		bool active = false;
 	};
+	struct RingSrt {
+		KamataEngine::Vector2 translation = {};
+		float rotation = 0.0f;
+		KamataEngine::Vector2 scale = {1.0f, 1.0f};
+	};
+	struct MiniatureSrt {
+		KamataEngine::Vector2 translation = {};
+		KamataEngine::Vector3 rotation = {};
+		KamataEngine::Vector3 scale = {1.0f, 1.0f, 1.0f};
+	};
 
 	void StartBossEncounter();
 	void StartBossCombat();
@@ -87,6 +97,12 @@ private:
 	void StartHealthBarEntrance();
 	void UpdateHealthBars();
 	void DrawHealthBars() const;
+	void UpdateHealthPortraitCamera(
+	    KamataEngine::Camera& camera,
+	    const KamataEngine::Vector3& modelCenter,
+	    const KamataEngine::Vector2& screenCenter,
+	    float distance);
+	void DrawDialogueSpeaker();
 
 	// =====================================================================
 	// Game-flow tuning. These constants are the main place to adjust the
@@ -106,18 +122,19 @@ private:
 
 	// =====================================================================
 	// Intro/title tuning, in seconds.
-	// Leave kIntroSpriteFile empty to use the temporary white screen. Later,
-	// put the PNG in Resources and set this to its relative resource path.
-	// Example: "title/intro.png"
+	// Full-screen 1280x720 intro artwork. It fades over the black title cover,
+	// then the existing title sequence continues normally.
 	// =====================================================================
-	static inline const char* kIntroSpriteFile = "";
-	static inline const float kIntroSpriteFadeInDuration = 1.50f;
+	static inline const char* kIntroSpriteFile = "titleFont/intro.png";
+	static inline const float kIntroSpriteFadeInDuration = 2.00f;
 	static inline const float kIntroSpriteStayDuration = 2.50f;
-	static inline const float kIntroSpriteFadeOutDuration = 1.50f;
+	static inline const float kIntroSpriteFadeOutDuration = 2.00f;
 	static inline const float kTitleLogoFadeInDuration = 2.50f;
 	static inline const float kTitleWorldFadeInDuration = 2.00f;
 	static inline const float kTitlePromptFadeInDuration = 1.25f;
 	static inline const float kTitleStartFadeOutDuration = 2.00f;
+	static inline const float kTitleStartBlinkDuration = 0.36f;
+	static inline const float kTitleStartBlinkInterval = 0.06f;
 
 	// Title idle movement and bottom prompt tuning.
 	static inline const char* kTitlePromptSpriteFile = "titleFont/titleui.png";
@@ -142,6 +159,8 @@ private:
 	static inline const float kMoonPositionY = 100.0f;
 	static inline const float kMoonWidth = 128.0f;
 	static inline const float kMoonHeight = 128.0f;
+	static inline const float kMoonScaleAmount = 0.025f;
+	static inline const float kMoonScaleCycleDuration = 3.20f;
 
 	// Walking tutorial layout. The images live at fixed world positions, so they
 	// scroll across the screen and the player walks past them like level objects.
@@ -156,6 +175,16 @@ private:
 	static inline const float kGameplayUiIdleCycleDuration = 2.20f;
 
 	static inline const float kHealthBarAppearDuration = 1.20f;
+	static inline const char* kCharacterRingSpriteFile = "character_ring.png";
+	static inline const float kPlayerHealthRingSize = 82.0f;
+	static inline const float kBossHealthRingSize = 88.0f;
+	static inline const float kPlayerPortraitCameraDistance = 5.0f;
+	static inline const float kBossPortraitCameraDistance = 5.0f;
+	static inline const float kPlayerPortraitBaseScale = 0.22f;
+	static inline const float kBossPortraitBaseScale = 0.28f;
+	static inline const float kDialogueSpeakerRingSize = 88.0f;
+	static inline const float kDialogueSpeakerPositionX = 72.0f;
+	static inline const float kDialogueSpeakerPositionY = 520.0f;
 	static inline const float kFrameTime = 1.0f / 60.0f;
 
 	// Result/defeat transition durations, in seconds.
@@ -164,6 +193,10 @@ private:
 	static inline const float kScreenFadeDuration = 1.80f;
 	static inline const float kResultLogoFadeInDuration = 2.25f;
 	static inline const float kResultLogoFadeOutDuration = 1.50f;
+	static inline const char* kGameOverSpriteFile = "gameover.png";
+	static inline const char* kGameClearSpriteFile = "gameclear.png";
+	static inline const float kResultSpriteWidth = 720.0f;
+	static inline const float kResultSpriteHeight = 256.0f;
 
 	// =====================================================================
 	// Combat tuning: maximum health and all currently implemented damage.
@@ -194,7 +227,7 @@ private:
 	// The temporary transition is: compress -> power surge -> settle.
 	static inline const float kBossPhaseTwoHealthRatio = 0.50f;
 	static inline const float kBossPhaseTransitionAnimationDuration = 2.80f;
-	static inline const uint32_t kBossPhaseDialoguePageCount = 1;
+	static inline const uint32_t kBossPhaseDialoguePageCount = 6;
 	// Regular encounter/phase dialogue box. The PNG includes a large transparent
 	// canvas, so these values crop the visible panel before fitting it to 1/4 screen.
 	static inline const char* kDialogueBoxSpriteFile = "dialougueBoxReal.png";
@@ -202,6 +235,16 @@ private:
 	static inline const float kDialogueBoxCropY = 653.0f;
 	static inline const float kDialogueBoxCropWidth = 1263.0f;
 	static inline const float kDialogueBoxCropHeight = 194.0f;
+	// Author future dialogue PNGs at exactly 820x203 pixels. That matches this
+	// on-screen rectangle one-for-one and keeps text sharp without stretching.
+	static inline const float kDialogueContentWidth = 820.0f;
+	static inline const float kDialogueContentHeight = 203.0f;
+	// The content PNGs have about ten transparent pixels before their text. This
+	// places that first visible pixel at the dialogue's left text boundary and
+	// centers the two-line artwork vertically inside the panel.
+	static inline const float kDialogueContentOffsetX = -120.0f;
+	static inline const float kDialogueContentOffsetY = 6.0f;
+	static inline const float kHealthBarDrainEaseSpeed = 7.0f;
 
 	// Boss-defeat particle tuning. Particle count changes the array size, so
 	// rebuild the project after changing it.
@@ -215,12 +258,17 @@ private:
 	static inline const float kBossDefeatParticleGravity = 1.55f;
 	// Change this value to control how many sprite dialogue pages must be
 	// advanced before the boss AI and health bars start.
-	static inline const uint32_t kBossDialoguePageCount = 3;
+	static inline const uint32_t kBossDialoguePageCount = 5;
 	MapChipField* mapChipField_ = nullptr;
 	Player* player_ = nullptr;
+	Player* playerHealthPortrait_ = nullptr;
 	CameraController* cameraController_ = nullptr;
 	Skydome* skydome_ = nullptr;
 	BossArmature* bossArmature_ = nullptr;
+	BossArmature* bossHealthPortrait_ = nullptr;
+	KamataEngine::Camera playerHealthPortraitCamera_;
+	KamataEngine::Camera bossHealthPortraitCamera_;
+	KamataEngine::Camera dialogueSpeakerPortraitCamera_;
 	DialogueSystem* dialogueSystem_ = nullptr;
 	DialogueSystem* phaseDialogueSystem_ = nullptr;
 	DialogueSystem* victoryDialogueSystem_ = nullptr;
@@ -234,6 +282,8 @@ private:
 	KamataEngine::Sprite* introSprite_ = nullptr;
 	KamataEngine::Sprite* titleCoverSprite_ = nullptr;
 	KamataEngine::Sprite* titleLogo_ = nullptr;
+	KamataEngine::Sprite* gameOverSprite_ = nullptr;
+	KamataEngine::Sprite* gameClearSprite_ = nullptr;
 	KamataEngine::Sprite* titlePromptSprite_ = nullptr;
 	std::array<KamataEngine::Sprite*, 3> backgroundSprites_ = {};
 	KamataEngine::Sprite* moonSprite_ = nullptr;
@@ -247,6 +297,15 @@ private:
 	KamataEngine::Sprite* bossHealthFrame_ = nullptr;
 	KamataEngine::Sprite* bossHealthBackground_ = nullptr;
 	KamataEngine::Sprite* bossHealthFill_ = nullptr;
+	KamataEngine::Sprite* playerHealthRing_ = nullptr;
+	KamataEngine::Sprite* bossHealthRing_ = nullptr;
+	KamataEngine::Sprite* dialogueSpeakerRing_ = nullptr;
+	RingSrt playerHealthRingSrt_;
+	RingSrt bossHealthRingSrt_;
+	RingSrt dialogueSpeakerRingSrt_;
+	MiniatureSrt playerHealthMiniatureSrt_;
+	MiniatureSrt bossHealthMiniatureSrt_;
+	MiniatureSrt dialogueSpeakerMiniatureSrt_;
 	std::array<KamataEngine::Sprite*, 5> bossRangeSprites_ = {};
 	FlowState flowState_ = FlowState::kIntroFadeIn;
 	EndType endType_ = EndType::kNone;
@@ -254,6 +313,8 @@ private:
 	BossPhaseState bossPhaseState_ = BossPhaseState::kPhaseOne;
 	float titleFadeTimer_ = 0.0f;
 	float titleIdleTimer_ = 0.0f;
+	float titleStartBlinkTimer_ = 0.0f;
+	float moonAnimationTimer_ = 0.0f;
 	float gameplayUiIdleTimer_ = 0.0f;
 	float titleCoverAlpha_ = 1.0f;
 	KamataEngine::Vector4 introSpriteBaseColor_ = {1.0f, 1.0f, 1.0f, 1.0f};
@@ -265,6 +326,8 @@ private:
 	float whiteFlashAlpha_ = 0.0f;
 	float playerHealthRatio_ = 1.0f;
 	float bossHealthRatio_ = 1.0f;
+	float displayedPlayerHealthRatio_ = 1.0f;
+	float displayedBossHealthRatio_ = 1.0f;
 	float dialogueBoxOpacity_ = 0.90f;
 	float defeatedDialogueOpacity_ = 0.98f;
 	KamataEngine::Vector3 defeatCameraBase_ = {};
@@ -277,6 +340,7 @@ private:
 	bool healthBarsVisible_ = false;
 	bool playerAttackHitBoss_ = false;
 	bool hookPullApplied_ = false;
+	bool throwHitApplied_ = false;
 	bool showBossRangeVisual_ = false;
 	bool showCollisionDebug_ = false;
 	bool restartToTitleRequested_ = false;

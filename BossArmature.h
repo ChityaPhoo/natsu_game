@@ -21,12 +21,14 @@ public:
 	void SetHorizontalBounds(float minX, float maxX);
 	void SetVisible(bool visible) { isVisible_ = visible; }
 	void SetDefeatBrightness(float brightness);
+	void SetModelOpacity(float opacity);
 	void BeginPhaseTransition();
 	void SetPhaseTransitionProgress(float progress);
 	void EndPhaseTransition();
 	CollisionBox GetBodyHitbox() const;
 	CollisionBox GetScytheHitbox() const;
 	bool IsScytheAttackActive() const;
+	bool IsScytheThrowInProgress() const { return activeAnimation_ == AnimationType::kScytheThrow; }
 	bool IsBodyAttackActive() const;
 	bool IsVerticalHookAttackActive() const;
 	bool IsJumpSlamImpactActive() const;
@@ -46,6 +48,11 @@ public:
 	}
 	bool IsAnimationDebugMode() const { return controlMode_ == ControlMode::kAnimationDebug; }
 	void Draw(const KamataEngine::Camera& camera);
+	void DrawHeadPortrait(
+	    const KamataEngine::Camera& camera,
+	    const KamataEngine::Vector3& rotationOffset,
+	    const KamataEngine::Vector3& scaleMultiplier);
+	KamataEngine::Vector3 GetHeadPortraitCenter() const;
 	void DrawDebug(const KamataEngine::Camera& camera);
 #ifdef USE_IMGUI
 	void DrawImGui();
@@ -228,6 +235,7 @@ private:
 	std::array<ModelPart, 4> modelParts_;
 	KamataEngine::Model* weaponModel_ = nullptr;
 	KamataEngine::WorldTransform weaponTransform_;
+	KamataEngine::WorldTransform headPortraitTransform_;
 	KamataEngine::Model* jointSphereModel_ = nullptr;
 	KamataEngine::ObjectColor defeatColor_;
 	bool showBossModel_ = true;
@@ -289,10 +297,14 @@ private:
 	float bodyHitboxHalfDepth_ = 1.00f;
 	KamataEngine::Vector3 scytheHitboxPadding_ = {0.20f, 0.20f, 0.20f};
 	float weaponHitboxScale_ = 0.85f;
-	float throwHitboxHalfWidth_ = 1.25f;
+	float throwHitboxHalfWidth_ = 1.05f;
 	float throwHitboxMinimumY_ = 1.80f;
 	float throwHitboxMaximumY_ = 6.20f;
 	float throwHitboxHalfDepth_ = 2.50f;
+	// 0.50 is outbound-only; 1.00 keeps collision through the complete return.
+	// A short early-return window accounts for the moving hand anchor without
+	// restoring the original full boomerang threat.
+	float throwDamageEndFlightProgress_ = 0.70f;
 	float normalAttackPlaybackSpeed_ = 1.8f;
 	float normalAttackPlaybackDuration_ = 2.20f;
 	float scytheThrowPlaybackSpeed_ = 1.0f;
@@ -314,7 +326,8 @@ private:
 	float jumpSlamStopDistance_ = 1.25f;
 	float closeDistance_ = 3.5f;
 	float midDistance_ = 10.0f;
-	float aiDecisionDelay_ = 0.65f;
+	float phaseOneAIDecisionDelay_ = 0.50f;
+	float phaseTwoAIDecisionDelay_ = 0.40f;
 	float retreatSpeed_ = 12.0f;
 	float retreatDuration_ = 1.10f;
 	float retreatJumpHeight_ = 2.20f;
@@ -368,6 +381,8 @@ private:
 	static inline const float kShadowPillarTelegraphDuration = 0.85f;
 	static inline const float kShadowPillarActiveDuration = 0.55f;
 	static inline const float kShadowPillarRiseDuration = 0.22f;
-	static inline const float kScytheReleaseTime = 0.62f;
-	static inline const float kScytheCatchTime = 1.88f;
+	// Give the player a clearer reaction window without speeding up the actual
+	// flight: release and catch move later by the same amount.
+	static inline const float kScytheReleaseTime = 0.68f;
+	static inline const float kScytheCatchTime = 1.94f;
 };

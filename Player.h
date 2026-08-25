@@ -22,6 +22,11 @@ public:
 	void UpdateIdleAnimation();
 	void Update();
 	void Draw(const KamataEngine::Camera& camera);
+	void DrawPortrait(
+	    const KamataEngine::Camera& camera,
+	    const KamataEngine::Vector3& rotationOffset,
+	    const KamataEngine::Vector3& scaleMultiplier);
+	void SetPortraitOpacity(float opacity);
 	void DrawDashCooldownMeter(const KamataEngine::Camera& camera) const;
 	const KamataEngine::WorldTransform& GetWorldTransform() const { return worldTransform_; }
 	const KamataEngine::Vector3& GetVelocity() const { return velocity_; }
@@ -53,6 +58,7 @@ private:
 	void UpdateAttackEffectTransform();
 	void UpdatePullMotion();
 	static float EaseOut(float start, float end, float t);
+	static float SmoothStep(float t);
 
 	static inline const float kAcceleration = 0.04f;
 	static inline const float kMaxSpeed = 0.25f;
@@ -69,9 +75,9 @@ private:
 	static inline const float kVisualOffsetY = 0.0f;
 	// Player breathing/idle animation tuning. This only affects drawing, so the
 	// collision box and movement position remain unchanged.
-	static inline const float kIdleMoveAmount = 0.18f;
-	static inline const float kIdleScaleAmount = 0.14f;
-	static inline const float kIdleHorizontalScaleAmount = 0.075f;
+	static inline const float kIdleMoveAmount = 0.075f;
+	static inline const float kIdleScaleAmount = 0.055f;
+	static inline const float kIdleHorizontalScaleAmount = 0.030f;
 	static inline const float kIdleCycleDuration = 1.65f;
 	static inline const float kIdleMaximumMovementSpeed = 0.05f;
 	static inline const float kMapMinCenterX = 0.45f;
@@ -91,9 +97,15 @@ private:
 	static inline const float kAttackChargeTime = 0.10f;
 	static inline const float kAttackStrikeTime = 0.12f;
 	static inline const float kAttackRecoveryTime = 0.18f;
-	static inline const float kAttackEffectOffsetX = 1.10f;
-	static inline const float kAttackEffectOffsetY = 0.0f;
-	static inline const float kAttackEffectScale = 1.0f;
+	static inline const float kAttackEffectOffsetX = 0.30f;
+	static inline const float kAttackEffectOffsetY = 0.05f;
+	static inline const float kAttackEffectScale = 0.65f;
+	static inline const float kSwordRestAngle = 0.15f;
+	static inline const float kSwordWindUpAngle = 1.00f;
+	// The strike finishes slightly past horizontal so the authored blade tip
+	// reaches the floor beside the player at the end of the cutting arc.
+	static inline const float kSwordStrikeAngle = -1.90f;
+	static inline const float kSwordRecoveryAngle = -0.40f;
 	static inline const float kAttackCollisionOffsetX = 1.10f;
 	static inline const float kAttackCollisionOffsetY = 0.0f;
 	static inline const float kAttackCollisionHalfWidth = 0.65f;
@@ -103,6 +115,8 @@ private:
 	// Uses a separate constant buffer from the gameplay/collision transform so
 	// restoring the logical pose cannot erase the breathing pose before drawing.
 	KamataEngine::WorldTransform visualTransform_;
+	KamataEngine::WorldTransform portraitTransform_;
+	KamataEngine::ObjectColor portraitColor_;
 	KamataEngine::WorldTransform attackEffectTransform_;
 	KamataEngine::Model* model_ = nullptr;
 	KamataEngine::Model* attackEffectModel_ = nullptr;

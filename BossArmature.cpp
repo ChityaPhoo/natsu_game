@@ -99,6 +99,7 @@ void BossArmature::Initialize() {
 	InitializeArticulatedArm(modelParts_[3], "float_L_arm", kRightElbow, kRightHand);
 	weaponModel_ = Model::CreateFromOBJ("hammer", true);
 	weaponTransform_.Initialize();
+	headPortraitTransform_.Initialize();
 	jointSphereModel_ = Model::CreateSphere(8, 8);
 	defeatColor_.Initialize();
 	defeatColor_.SetColor({1.0f, 1.0f, 1.0f, 1.0f});
@@ -405,6 +406,31 @@ void BossArmature::Draw(const Camera& camera) {
 	if (weaponModel_ != nullptr) { weaponModel_->Draw(weaponTransform_, camera, &defeatColor_); }
 }
 
+void BossArmature::DrawHeadPortrait(
+    const Camera& camera, const Vector3& rotationOffset,
+    const Vector3& scaleMultiplier) {
+	if (!showBossModel_ || !isVisible_) { return; }
+	const ModelPart& head = modelParts_[1];
+	if (head.model == nullptr) { return; }
+	const Vector3 center = GetHeadPortraitCenter();
+	const Matrix4x4 moveToOrigin = Matrix4x4Calculation::MakeTranslateMatrix(
+	    {-center.x, -center.y, -center.z});
+	const Matrix4x4 portraitAdjustment = Matrix4x4Calculation::MakeAffineMatrix(
+	    scaleMultiplier, rotationOffset, center);
+	headPortraitTransform_.matWorld_ = Matrix4x4Calculation::Multiply(
+	    Matrix4x4Calculation::Multiply(head.worldTransform.matWorld_, moveToOrigin),
+	    portraitAdjustment);
+	headPortraitTransform_.TransferMatrix();
+	head.model->Draw(headPortraitTransform_, camera, &defeatColor_);
+}
+
+Vector3 BossArmature::GetHeadPortraitCenter() const {
+	Vector3 center = joints_[kHead].worldPosition;
+	// float_Head is attached below the head joint by this authored offset.
+	center.y -= 1.10f;
+	return center;
+}
+
 void BossArmature::DrawArticulatedModelPart(const ModelPart& part, const Camera& camera) const {
 	for (std::size_t pieceIndex = 0; pieceIndex < part.articulatedMeshCount; ++pieceIndex) {
 		if (part.articulatedModels[pieceIndex] == nullptr) { continue; }
@@ -466,6 +492,18 @@ void BossArmature::DrawImGui() {
 		ImGui::DragFloat("Throw hitbox maximum Y", &throwHitboxMaximumY_, 0.02f, 0.0f, 12.0f);
 		throwHitboxMaximumY_ = (std::max)(throwHitboxMaximumY_, throwHitboxMinimumY_ + 0.10f);
 		ImGui::DragFloat("Throw hitbox half depth", &throwHitboxHalfDepth_, 0.02f, 0.10f, 5.0f);
+		ImGui::SliderFloat(
+		    "Throw damaging flight portion", &throwDamageEndFlightProgress_,
+		    0.50f, 1.00f, "%.2f");
+	}
+	if (ImGui::CollapsingHeader("Boss AI Timing", ImGuiTreeNodeFlags_DefaultOpen)) {
+		ImGui::DragFloat(
+		    "Phase 1 interval", &phaseOneAIDecisionDelay_, 0.05f,
+		    0.0f, 3.0f, "%.2f sec");
+		ImGui::DragFloat(
+		    "Phase 2 interval", &phaseTwoAIDecisionDelay_, 0.05f,
+		    0.0f, 3.0f, "%.2f sec");
+		ImGui::TextUnformatted("Hook -> Spin ignores this interval and chains immediately.");
 	}
 
 	ImGui::SeparatorText("Control Mode");
@@ -501,7 +539,6 @@ void BossArmature::DrawImGui() {
 			ImGui::DragFloat("Mid distance", &midDistance_, 0.10f, 2.0f, 30.0f);
 			closeDistance_ = std::clamp(closeDistance_, 1.0f, 19.5f);
 			midDistance_ = std::clamp(midDistance_, closeDistance_ + 0.5f, 30.0f);
-			ImGui::DragFloat("Decision delay", &aiDecisionDelay_, 0.05f, 0.0f, 3.0f, "%.2f sec");
 			ImGui::DragFloat("Retreat speed", &retreatSpeed_, 0.10f, 0.1f, 18.0f);
 			ImGui::DragFloat("Retreat duration", &retreatDuration_, 0.05f, 0.1f, 3.0f, "%.2f sec");
 			ImGui::DragFloat("Retreat jump height", &retreatJumpHeight_, 0.05f, 0.0f, 6.0f);
@@ -1007,6 +1044,11 @@ void BossArmature::SetDefeatBrightness(float brightness) {
 	defeatColor_.SetColor({brightness, brightness, brightness, 1.0f});
 }
 
+void BossArmature::SetModelOpacity(float opacity) {
+	opacity = std::clamp(opacity, 0.0f, 1.0f);
+	defeatColor_.SetColor({1.0f, 1.0f, 1.0f, opacity});
+}
+
 BossArmature::CollisionBox BossArmature::GetBodyHitbox() const {
 	const Vector3& root = joints_[kRoot].worldPosition;
 	const Vector3& head = joints_[kHead].worldPosition;
@@ -1110,7 +1152,13 @@ bool BossArmature::IsScytheAttackActive() const {
 	case AnimationType::kNormalAttack:
 		return animationTime_ >= 0.30f && animationTime_ <= 0.82f;
 	case AnimationType::kScytheThrow:
-		return animationTime_ >= 0.58f && animationTime_ <= 1.92f;
+		// Keep a short collision margin after the apex. The scythe's hand anchor
+		// moves during the throw, so an exact 0.50 cutoff can end before the visual
+		// actually crosses the player. Most of the return remains harmless.
+		return animationTime_ >= kScytheReleaseTime &&
+		       animationTime_ <= std::lerp(
+		           kScytheReleaseTime, kScytheCatchTime,
+		           std::clamp(throwDamageEndFlightProgress_, 0.50f, 1.00f));
 	case AnimationType::kSpinAttack:
 		return animationTime_ >= 0.20f && animationTime_ <= 1.72f;
 	case AnimationType::kVerticalHook:
@@ -1272,8 +1320,14 @@ void BossArmature::UpdateAI() {
 			}
 		}
 		break;
-	case AIState::kMeleeAttack:
 	case AIState::kVerticalHook:
+		if (activeAnimation_ == AnimationType::kNone) {
+			// Hook is a deliberate two-part combo. Skip the normal decision wait and
+			// start Spin on the very next AI update after the hook finishes.
+			EnterAIState(AIState::kSpinAttack);
+		}
+		break;
+	case AIState::kMeleeAttack:
 	case AIState::kScytheThrow:
 	case AIState::kPhaseTwoGroundWave:
 	case AIState::kPhaseTwoPillars:
@@ -1347,7 +1401,7 @@ void BossArmature::EnterAIState(AIState state) {
 
 	switch (state) {
 	case AIState::kWaiting:
-		aiWaitTimer_ = aiDecisionDelay_;
+		aiWaitTimer_ = isPhaseTwo_ ? phaseTwoAIDecisionDelay_ : phaseOneAIDecisionDelay_;
 		break;
 	case AIState::kMeleeAttack:
 		StartAnimation(AnimationType::kNormalAttack);

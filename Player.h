@@ -31,9 +31,12 @@ public:
 	const KamataEngine::WorldTransform& GetWorldTransform() const { return worldTransform_; }
 	const KamataEngine::Vector3& GetVelocity() const { return velocity_; }
 	bool IsAttackActive() const;
+	bool ConsumeAttackSwingStarted();
+	bool ConsumeMovementCueStarted();
 	bool IsDashInvincible() const;
 	bool IsDashing() const { return actionState_ == ActionState::kDash; }
 	bool IsBeingPulled() const { return pullActive_; }
+	bool IsOnGround() const { return onGround_; }
 	bool IsFacingRight() const { return currentDirection_ == LRDirection::kRight; }
 	AttackHitbox GetBodyHitbox() const;
 	AttackHitbox GetAttackHitbox() const;
@@ -131,6 +134,8 @@ private:
 	bool canAirDash_ = true;
 	bool canAirAttack_ = true;
 	bool isAttackEffectVisible_ = false;
+	bool attackSwingStarted_ = false;
+	bool movementCueStarted_ = false;
 	float turnStartRotationY_ = 0.0f;
 	float turnTimer_ = 0.0f;
 	float actionTimer_ = 0.0f;

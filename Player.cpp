@@ -36,6 +36,8 @@ void Player::Initialize() {
 	pullActive_ = false;
 	idleAnimationTimer_ = 0.0f;
 	isAttackEffectVisible_ = false;
+	attackSwingStarted_ = false;
+	movementCueStarted_ = false;
 	currentDirection_ = LRDirection::kRight;
 	worldTransform_.rotation_.y = std::numbers::pi_v<float> / 2.0f;
 	attackEffectTransform_.scale_ = {kAttackEffectScale, kAttackEffectScale, kAttackEffectScale};
@@ -77,6 +79,8 @@ void Player::StartPullToward(float targetX, float maximumDistance, float duratio
 void Player::NotifyDamage() { damageBlinkTimer_ = kDamageBlinkDuration; }
 
 void Player::Update() {
+	attackSwingStarted_ = false;
+	movementCueStarted_ = false;
 	Input* input = Input::GetInstance();
 	const GamepadInput::Snapshot gamepad = GamepadInput::ReadPlayerOne();
 	const bool right = input->PushKey(DIK_D) ||
@@ -99,6 +103,7 @@ void Player::Update() {
 			if (!onGround_) { canAirAttack_ = false; }
 		} else if (dashTriggered && dashCooldownTimer_ <= 0.0f && (onGround_ || canAirDash_)) {
 			actionState_ = ActionState::kDash;
+			movementCueStarted_ = true;
 			dashPhase_ = DashPhase::kCharge;
 			actionTimer_ = 0.0f;
 			dashCooldownTimer_ = kDashCooldown;
@@ -128,6 +133,7 @@ void Player::Update() {
 		                           GamepadInput::IsTriggered(gamepad, XINPUT_GAMEPAD_A);
 		if (jumpTriggered && jumpsRemaining_ > 0) {
 			velocity_.y = kJumpAcceleration;
+			movementCueStarted_ = true;
 			onGround_ = false;
 			--jumpsRemaining_;
 		} else if (!onGround_) {
@@ -166,6 +172,7 @@ void Player::Update() {
 		plannedMove.y = velocity_.y;
 		isAttackEffectVisible_ = false;
 	} else {
+		const AttackPhase previousAttackPhase = attackPhase_;
 		actionTimer_ += kFrameTime;
 		const float chargeEnd = kAttackChargeTime;
 		const float strikeEnd = chargeEnd + kAttackStrikeTime;
@@ -180,6 +187,7 @@ void Player::Update() {
 			isAttackEffectVisible_ = true;
 		} else if (actionTimer_ < strikeEnd) {
 			attackPhase_ = AttackPhase::kStrike;
+			attackSwingStarted_ = previousAttackPhase != AttackPhase::kStrike;
 			const float t = (actionTimer_ - chargeEnd) / kAttackStrikeTime;
 			worldTransform_.scale_.z = EaseOut(0.3f, 1.3f, t);
 			worldTransform_.scale_.y = EaseOut(1.6f, 0.7f, t);
@@ -352,6 +360,18 @@ void Player::UpdateAttackEffectTransform() {
 
 bool Player::IsAttackActive() const {
 	return actionState_ == ActionState::kAttack && attackPhase_ == AttackPhase::kStrike;
+}
+
+bool Player::ConsumeAttackSwingStarted() {
+	const bool started = attackSwingStarted_;
+	attackSwingStarted_ = false;
+	return started;
+}
+
+bool Player::ConsumeMovementCueStarted() {
+	const bool started = movementCueStarted_;
+	movementCueStarted_ = false;
+	return started;
 }
 
 bool Player::IsDashInvincible() const {

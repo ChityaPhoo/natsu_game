@@ -1,8 +1,10 @@
 #include "GameScene.h"
 #include "GamepadInput.h"
 #include "Matrix4x4Calculation.h"
+#include <audio/Audio.h>
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
 #include <numbers>
 #ifdef USE_IMGUI
 #include <imgui.h>
@@ -84,17 +86,17 @@ void GameScene::Initialize() {
 	victoryDialogueSystem_ = new DialogueSystem();
 	victoryDialogueSystem_->Initialize(
 	    1,
-	    {
-	        // Add the full-screen post-boss dialogue sprite here later.
-	        // Example: "dialogue/boss_defeated.png",
-	    },
-	    1.0f);
-	// The post-boss dialogue is a separate full-screen black page. Its opacity
-	// remains independently adjustable from the regular dialogue box.
-	victoryDialogueSystem_->SetBaseColor({0.0f, 0.0f, 0.0f, 1.0f});
+	    {kDialogueBoxSpriteFile},
+	    0.25f,
+	    {kDialogueBoxCropX, kDialogueBoxCropY},
+	    {kDialogueBoxCropWidth, kDialogueBoxCropHeight});
+	victoryDialogueSystem_->SetPageContentSprites(
+	    {"dialogue/dia4.png"},
+	    {kDialogueContentWidth, kDialogueContentHeight},
+	    {kDialogueContentOffsetX, kDialogueContentOffsetY});
 	dialogueSystem_->SetOpacity(dialogueBoxOpacity_);
 	phaseDialogueSystem_->SetOpacity(dialogueBoxOpacity_);
-	victoryDialogueSystem_->SetOpacity(defeatedDialogueOpacity_);
+	victoryDialogueSystem_->SetOpacity(dialogueBoxOpacity_);
 	defeatParticleModel_ = Model::CreateSphere(6, 6);
 	bossAttackModel_ = Model::CreateFromOBJ("boss_Attack", true);
 	bossAttackWaveModel_ = Model::CreateFromOBJ("boss_AttackWave", true);
@@ -234,23 +236,28 @@ void GameScene::Initialize() {
 	bossEncounterStarted_ = false;
 	bossDialogueStarted_ = false;
 	bossAIStarted_ = false;
+	InitializeAudio();
 	mapChipField_->Update();
 	skydome_->Update(cameraController_->GetCamera());
 	UpdateBackgroundSprites();
 }
 
 void GameScene::Update() {
+	UpdateAudio();
 	player_->UpdateIdleAnimation();
 	playerHealthPortrait_->UpdateIdleAnimation();
 	bossHealthPortrait_->Update({bossHealthPortrait_->GetPosition().x - 10.0f, 2.401f, 0.0f});
 	if (flowState_ != FlowState::kPlay) {
+		UpdateFootstepAudio(false);
 		cameraController_->SetDebugMode(false, {});
 		UpdateTitle();
 		return;
 	}
 	if (endType_ != EndType::kNone) {
+		UpdateFootstepAudio(false);
 		cameraController_->SetDebugMode(false, {});
 		UpdateEndSequence();
+		UpdateDialogueAudio();
 		UpdateHealthBars();
 		mapChipField_->Update();
 		skydome_->Update(cameraController_->GetCamera());
@@ -267,7 +274,13 @@ void GameScene::Update() {
 
 	// Freeze gameplay input while arranging a boss pose, in addition to the
 	// normal encounter/dialogue/phase-transition freezes.
-	if (!isBossEditing && (!bossEncounterStarted_ || bossAIStarted_) && !IsBossPhaseSequenceActive()) { player_->Update(); }
+	const bool canUpdatePlayer =
+	    !isBossEditing && (!bossEncounterStarted_ || bossAIStarted_) && !IsBossPhaseSequenceActive();
+	if (canUpdatePlayer) {
+		player_->Update();
+		UpdatePlayerActionAudio();
+	}
+	UpdateFootstepAudio(canUpdatePlayer);
 	cameraController_->Update();
 	UpdateBackgroundSprites();
 	UpdateGameplayTutorialUi();
@@ -285,13 +298,16 @@ void GameScene::Update() {
 	}
 	UpdateBossPhaseSequence();
 	bossArmature_->Update(player_->GetWorldTransform().translation_);
+	UpdateBossActionAudio();
 	if (bossArmature_->ConsumeSlamImpact()) {
+		PlayBossImpactCue();
 		cameraController_->StartShake(kBossSlamShakeDuration, kBossSlamShakeIntensity);
 	}
 	if (!isBossEditing && bossAIStarted_ && !IsBossPhaseSequenceActive()) {
 		UpdateCombatCollisions();
 		if (endType_ == EndType::kNone && !IsBossPhaseSequenceActive()) { ResolveBossBodyCollision(); }
 	}
+	UpdateDialogueAudio();
 	UpdateHealthBars();
 #ifdef USE_IMGUI
 	bossArmature_->DrawImGui();
@@ -305,6 +321,7 @@ void GameScene::StartBossCombat() {
 	bossAIStarted_ = true;
 	bossArmature_->SetAIEnabled(true);
 	StartHealthBarEntrance();
+	RequestBgm(BgmTrack::kPhaseOneRequiem);
 }
 
 bool GameScene::IsBossPhaseSequenceActive() const {
@@ -323,6 +340,7 @@ void GameScene::StartBossPhaseAnimation() {
 	bossPhaseState_ = BossPhaseState::kTransitionAnimation;
 	bossPhaseTimer_ = 0.0f;
 	bossArmature_->BeginPhaseTransition();
+	RequestBgm(BgmTrack::kPhaseTwoGothic);
 }
 
 void GameScene::UpdateBossPhaseSequence() {
@@ -443,6 +461,7 @@ void GameScene::UpdateCombatCollisions() {
 	playerHealthRatio_ = static_cast<float>(playerHealth_) / static_cast<float>(playerMaximumHealth_);
 	damageInvincibilityTimer_ = kDamageInvincibilityDuration;
 	player_->NotifyDamage();
+	PlayPlayerDamageCue();
 	cameraController_->StartShake(kPlayerHitShakeDuration, kPlayerHitShakeIntensity);
 	if (playerHealth_ <= 0) { StartPlayerDefeat(); }
 }
@@ -465,6 +484,198 @@ float GameScene::SmoothStep(float t) {
 	return t * t * t * (t * (t * 6.0f - 15.0f) + 10.0f);
 }
 
+void GameScene::InitializeAudio() {
+	Audio* audio = Audio::GetInstance();
+	auto tryLoad = [&](AudioClip& clip, const char* relativePath) {
+		std::error_code error;
+		const std::filesystem::path fullPath = std::filesystem::path("Resources") / relativePath;
+		if (!std::filesystem::is_regular_file(fullPath, error)) { return false; }
+		clip.soundHandle = audio->LoadWave(relativePath);
+		clip.loaded = true;
+		return true;
+	};
+	auto loadWithFallback = [&](AudioClip& clip, const char* preferredPath, const char* fallbackPath) {
+		if (!tryLoad(clip, preferredPath)) { tryLoad(clip, fallbackPath); }
+	};
+
+	tryLoad(novusOrdoSeclorumClip_, kNovusOrdoSeclorumFile);
+	tryLoad(phaseOneRequiemClip_, kPhaseOneRequiemFile);
+	tryLoad(phaseTwoGothicClip_, kPhaseTwoGothicFile);
+	loadWithFallback(gameOverCueClip_, kGameOverCueFile, kGameOverFallbackFile);
+	loadWithFallback(gameClearCueClip_, kGameClearCueFile, kGameClearFallbackFile);
+	tryLoad(titleConfirmCueClip_, kTitleConfirmCueFile);
+	tryLoad(footstepCueClip_, kFootstepCueFile);
+	tryLoad(playerDamageCueClip_, kPlayerDamageCueFile);
+	tryLoad(swordSwingCueClip_, kSwordSwingCueFile);
+	tryLoad(dialogueBlipCueClip_, kDialogueBlipCueFile);
+	tryLoad(playerJumpDashCueClip_, kPlayerJumpDashCueFile);
+	tryLoad(bossMoveCueClip_, kBossMoveCueFile);
+	tryLoad(bossImpactCueClip_, kBossImpactCueFile);
+	tryLoad(bossDefeatCueClip_, kBossDefeatCueFile);
+
+	currentBgmTrack_ = BgmTrack::kNone;
+	nextBgmTrack_ = BgmTrack::kNone;
+	currentBgmVoiceActive_ = false;
+	nextBgmVoiceActive_ = false;
+	bgmCrossfading_ = false;
+	bgmCrossfadeTimer_ = 0.0f;
+	resultCueVoiceActive_ = false;
+	footstepVoiceActive_ = false;
+	resultCuePlayed_ = false;
+}
+
+const GameScene::AudioClip* GameScene::GetBgmClip(BgmTrack track) const {
+	switch (track) {
+	case BgmTrack::kNovusOrdoSeclorum:
+		return &novusOrdoSeclorumClip_;
+	case BgmTrack::kPhaseOneRequiem:
+		return &phaseOneRequiemClip_;
+	case BgmTrack::kPhaseTwoGothic:
+		return &phaseTwoGothicClip_;
+	case BgmTrack::kNone:
+		return nullptr;
+	}
+	return nullptr;
+}
+
+void GameScene::RequestBgm(BgmTrack track) {
+	if (!bgmCrossfading_ && track == currentBgmTrack_) { return; }
+	if (bgmCrossfading_ && track == nextBgmTrack_) { return; }
+
+	const AudioClip* nextClip = GetBgmClip(track);
+	// Missing optional music must never interrupt the track that is already
+	// playing or open the engine's missing-resource message box.
+	if (track != BgmTrack::kNone && (nextClip == nullptr || !nextClip->loaded)) { return; }
+
+	Audio* audio = Audio::GetInstance();
+	if (nextBgmVoiceActive_) {
+		audio->StopWave(nextBgmVoice_);
+		nextBgmVoiceActive_ = false;
+	}
+	nextBgmTrack_ = track;
+	if (nextClip != nullptr) {
+		nextBgmVoice_ = audio->PlayWave(nextClip->soundHandle, true, 0.0f);
+		nextBgmVoiceActive_ = true;
+	}
+	bgmCrossfadeTimer_ = 0.0f;
+	bgmCrossfading_ = true;
+}
+
+void GameScene::UpdateAudio() {
+	if (!bgmCrossfading_) { return; }
+
+	Audio* audio = Audio::GetInstance();
+	const float duration = (std::max)(kBgmCrossfadeDuration, kFrameTime);
+	bgmCrossfadeTimer_ = (std::min)(bgmCrossfadeTimer_ + kFrameTime, duration);
+	const float fade = SmoothStep(bgmCrossfadeTimer_ / duration);
+	if (currentBgmVoiceActive_) {
+		audio->SetVolume(currentBgmVoice_, kBgmVolume * (1.0f - fade));
+	}
+	if (nextBgmVoiceActive_) { audio->SetVolume(nextBgmVoice_, kBgmVolume * fade); }
+
+	if (bgmCrossfadeTimer_ < duration) { return; }
+	if (currentBgmVoiceActive_) { audio->StopWave(currentBgmVoice_); }
+	currentBgmTrack_ = nextBgmTrack_;
+	currentBgmVoice_ = nextBgmVoice_;
+	currentBgmVoiceActive_ = nextBgmVoiceActive_;
+	nextBgmTrack_ = BgmTrack::kNone;
+	nextBgmVoiceActive_ = false;
+	bgmCrossfading_ = false;
+	bgmCrossfadeTimer_ = 0.0f;
+}
+
+void GameScene::PlayTitleConfirmCue() {
+	if (!titleConfirmCueClip_.loaded) { return; }
+	Audio::GetInstance()->PlayWave(titleConfirmCueClip_.soundHandle, false, kTitleConfirmCueVolume);
+}
+
+void GameScene::UpdateFootstepAudio(bool movementEnabled) {
+	const bool isWalking =
+	    movementEnabled && footstepCueClip_.loaded && player_->IsOnGround() &&
+	    !player_->IsDashing() && !player_->IsBeingPulled() &&
+	    std::abs(player_->GetVelocity().x) >= kFootstepMinimumSpeed;
+	Audio* audio = Audio::GetInstance();
+	if (isWalking) {
+		if (!footstepVoiceActive_ || !audio->IsPlaying(footstepVoice_)) {
+			footstepVoice_ = audio->PlayWave(footstepCueClip_.soundHandle, true, kFootstepCueVolume);
+			footstepVoiceActive_ = true;
+		}
+		return;
+	}
+	if (footstepVoiceActive_) {
+		audio->StopWave(footstepVoice_);
+		footstepVoiceActive_ = false;
+	}
+}
+
+void GameScene::UpdatePlayerActionAudio() {
+	const bool attackSwingStarted = player_->ConsumeAttackSwingStarted();
+	const bool movementStarted = player_->ConsumeMovementCueStarted();
+	if (attackSwingStarted && swordSwingCueClip_.loaded) {
+		Audio::GetInstance()->PlayWave(swordSwingCueClip_.soundHandle, false, kSwordSwingCueVolume);
+	}
+	if (movementStarted && playerJumpDashCueClip_.loaded) {
+		Audio::GetInstance()->PlayWave(playerJumpDashCueClip_.soundHandle, false, kPlayerJumpDashCueVolume);
+	}
+}
+
+void GameScene::UpdateBossActionAudio() {
+	const BossArmature::SoundCue cue = bossArmature_->ConsumeSoundCue();
+	if (cue == BossArmature::SoundCue::kMove && bossMoveCueClip_.loaded) {
+		Audio::GetInstance()->PlayWave(bossMoveCueClip_.soundHandle, false, kBossMoveCueVolume);
+	} else if (cue == BossArmature::SoundCue::kImpact) {
+		PlayBossImpactCue();
+	}
+}
+
+void GameScene::UpdateDialogueAudio() {
+	const bool encounterPageStarted = dialogueSystem_ != nullptr && dialogueSystem_->ConsumePageStarted();
+	const bool phasePageStarted = phaseDialogueSystem_ != nullptr && phaseDialogueSystem_->ConsumePageStarted();
+	const bool victoryPageStarted = victoryDialogueSystem_ != nullptr && victoryDialogueSystem_->ConsumePageStarted();
+	if ((!encounterPageStarted && !phasePageStarted && !victoryPageStarted) || !dialogueBlipCueClip_.loaded) { return; }
+	Audio::GetInstance()->PlayWave(dialogueBlipCueClip_.soundHandle, false, kDialogueBlipCueVolume);
+}
+
+void GameScene::PlayPlayerDamageCue() {
+	if (!playerDamageCueClip_.loaded) { return; }
+	Audio::GetInstance()->PlayWave(playerDamageCueClip_.soundHandle, false, kPlayerDamageCueVolume);
+}
+
+void GameScene::PlayBossImpactCue() {
+	if (!bossImpactCueClip_.loaded) { return; }
+	Audio::GetInstance()->PlayWave(bossImpactCueClip_.soundHandle, false, kBossImpactCueVolume);
+}
+
+void GameScene::PlayBossDefeatCue() {
+	if (!bossDefeatCueClip_.loaded) { return; }
+	Audio::GetInstance()->PlayWave(bossDefeatCueClip_.soundHandle, false, kBossDefeatCueVolume);
+}
+
+void GameScene::PlayResultCue() {
+	if (resultCuePlayed_) { return; }
+	resultCuePlayed_ = true;
+	const AudioClip& clip =
+	    endType_ == EndType::kPlayerDefeat ? gameOverCueClip_ : gameClearCueClip_;
+	if (!clip.loaded) { return; }
+	resultCueVoice_ = Audio::GetInstance()->PlayWave(clip.soundHandle, false, kResultCueVolume);
+	resultCueVoiceActive_ = true;
+}
+
+void GameScene::StopAllAudio() {
+	Audio* audio = Audio::GetInstance();
+	if (currentBgmVoiceActive_) { audio->StopWave(currentBgmVoice_); }
+	if (nextBgmVoiceActive_) { audio->StopWave(nextBgmVoice_); }
+	if (footstepVoiceActive_) { audio->StopWave(footstepVoice_); }
+	if (resultCueVoiceActive_ && audio->IsPlaying(resultCueVoice_)) {
+		audio->StopWave(resultCueVoice_);
+	}
+	currentBgmVoiceActive_ = false;
+	nextBgmVoiceActive_ = false;
+	footstepVoiceActive_ = false;
+	resultCueVoiceActive_ = false;
+	bgmCrossfading_ = false;
+}
+
 void GameScene::StartPlayerDefeat() {
 	if (endType_ != EndType::kNone) { return; }
 	playerHealth_ = 0;
@@ -476,9 +687,12 @@ void GameScene::StartPlayerDefeat() {
 	bossArmature_->SetAIEnabled(false);
 	gameOverSprite_->SetColor({1.0f, 1.0f, 1.0f, 0.0f});
 	gameClearSprite_->SetColor({1.0f, 1.0f, 1.0f, 0.0f});
+	titlePromptSprite_->SetColor({1.0f, 1.0f, 1.0f, 0.0f});
 	blackOverlayAlpha_ = 0.0f;
 	whiteFlashAlpha_ = 0.0f;
 	resultContinueRequested_ = false;
+	resultCuePlayed_ = false;
+	RequestBgm(BgmTrack::kNone);
 }
 
 void GameScene::StartBossDefeat() {
@@ -497,7 +711,11 @@ void GameScene::StartBossDefeat() {
 	resultContinueRequested_ = false;
 	gameOverSprite_->SetColor({1.0f, 1.0f, 1.0f, 0.0f});
 	gameClearSprite_->SetColor({1.0f, 1.0f, 1.0f, 0.0f});
+	titlePromptSprite_->SetColor({1.0f, 1.0f, 1.0f, 0.0f});
 	SpawnBossDefeatParticles();
+	PlayBossDefeatCue();
+	resultCuePlayed_ = false;
+	RequestBgm(BgmTrack::kNone);
 }
 
 void GameScene::BeginFadeToResult() {
@@ -508,10 +726,11 @@ void GameScene::BeginFadeToResult() {
 }
 
 void GameScene::UpdateEndSequence() {
-	// Accept either result key as soon as the screen is fading to black. The
-	// request is remembered until the logo finishes fading in, so a key press
-	// during the transition is never lost.
-	if (endPhase_ == EndPhase::kFadeToBlack || endPhase_ == EndPhase::kLogoFadeIn || endPhase_ == EndPhase::kLogoWait) {
+	// Wait until the result prompt has appeared before accepting input. This
+	// gives the game-over/game-clear art time to land before asking the player
+	// to continue.
+	if (endPhase_ == EndPhase::kLogoWait &&
+	    endPhaseTimer_ >= kResultPromptDelay + kResultPromptFadeInDuration) {
 		if (Input::GetInstance()->TriggerKey(DIK_SPACE) || Input::GetInstance()->TriggerKey(DIK_RETURN) ||
 		    GamepadInput::IsTriggered(GamepadInput::ReadPlayerOne(), XINPUT_GAMEPAD_A)) {
 			resultContinueRequested_ = true;
@@ -570,6 +789,7 @@ void GameScene::UpdateEndSequence() {
 		if (endPhaseTimer_ >= kScreenFadeDuration) {
 			endPhase_ = EndPhase::kLogoFadeIn;
 			endPhaseTimer_ = 0.0f;
+			PlayResultCue();
 		}
 		break;
 	case EndPhase::kLogoFadeIn: {
@@ -581,10 +801,23 @@ void GameScene::UpdateEndSequence() {
 		if (endPhaseTimer_ >= kResultLogoFadeInDuration) {
 			endPhase_ = EndPhase::kLogoWait;
 			endPhaseTimer_ = 0.0f;
+			titlePromptSprite_->SetColor({1.0f, 1.0f, 1.0f, 0.0f});
 		}
 		break;
 	}
 	case EndPhase::kLogoWait: {
+		endPhaseTimer_ += kFrameTime;
+		const float promptProgress = SmoothStep(
+		    (endPhaseTimer_ - kResultPromptDelay) /
+		    (std::max)(kResultPromptFadeInDuration, kFrameTime));
+		const float promptCycle = (std::max)(kTitlePromptIdleCycleDuration, kFrameTime);
+		const float promptOffset =
+		    std::sin(endPhaseTimer_ / promptCycle * 2.0f * std::numbers::pi_v<float>) *
+		    kTitlePromptIdleMoveAmount;
+		titlePromptSprite_->SetPosition({
+		    static_cast<float>(WinApp::kWindowWidth) * 0.5f,
+		    kTitlePromptBaseY + promptOffset});
+		titlePromptSprite_->SetColor({1.0f, 1.0f, 1.0f, promptProgress});
 		if (resultContinueRequested_) {
 			endPhase_ = EndPhase::kLogoFadeOut;
 			endPhaseTimer_ = 0.0f;
@@ -597,6 +830,7 @@ void GameScene::UpdateEndSequence() {
 		const float alpha = 1.0f - SmoothStep(endPhaseTimer_ / kResultLogoFadeOutDuration);
 		Sprite* resultSprite = endType_ == EndType::kPlayerDefeat ? gameOverSprite_ : gameClearSprite_;
 		resultSprite->SetColor({1.0f, 1.0f, 1.0f, alpha});
+		titlePromptSprite_->SetColor({1.0f, 1.0f, 1.0f, alpha});
 		if (endPhaseTimer_ >= kResultLogoFadeOutDuration) { restartToTitleRequested_ = true; }
 		break;
 	}
@@ -801,16 +1035,21 @@ void GameScene::DrawHealthBars() const {
 void GameScene::DrawDialogueSpeaker() {
 	DialogueSystem* activeDialogue = nullptr;
 	bool isPhaseDialogue = false;
+	bool isVictoryDialogue = false;
 	if (dialogueSystem_ != nullptr && dialogueSystem_->IsActive()) {
 		activeDialogue = dialogueSystem_;
 	} else if (phaseDialogueSystem_ != nullptr && phaseDialogueSystem_->IsActive()) {
 		activeDialogue = phaseDialogueSystem_;
 		isPhaseDialogue = true;
+	} else if (victoryDialogueSystem_ != nullptr && victoryDialogueSystem_->IsActive()) {
+		activeDialogue = victoryDialogueSystem_;
+		isVictoryDialogue = true;
 	}
 	if (activeDialogue == nullptr) { return; }
 
 	const uint32_t page = activeDialogue->GetCurrentPage();
-	const bool isPlayerSpeaker = isPhaseDialogue ? (page == 2 || page == 4) : page == 3;
+	const bool isPlayerSpeaker =
+	    isVictoryDialogue || (isPhaseDialogue ? (page == 2 || page == 4) : page == 3);
 	RingSrt speakerRingSrt = dialogueSpeakerRingSrt_;
 	MiniatureSrt speakerMiniatureSrt = dialogueSpeakerMiniatureSrt_;
 	float ringBaseSize = kDialogueSpeakerRingSize;
@@ -1065,6 +1304,9 @@ void GameScene::DrawEndOverlay() const {
 	if (endPhase_ == EndPhase::kLogoFadeIn || endPhase_ == EndPhase::kLogoWait || endPhase_ == EndPhase::kLogoFadeOut) {
 		Sprite* resultSprite = endType_ == EndType::kPlayerDefeat ? gameOverSprite_ : gameClearSprite_;
 		resultSprite->Draw();
+		if (endPhase_ == EndPhase::kLogoWait || endPhase_ == EndPhase::kLogoFadeOut) {
+			titlePromptSprite_->Draw();
+		}
 	}
 	Sprite::PostDraw();
 }
@@ -1144,9 +1386,7 @@ void GameScene::DrawCombatImGui() {
 	if (ImGui::SliderFloat("Dialogue box opacity", &dialogueBoxOpacity_, 0.0f, 1.0f, "%.2f")) {
 		dialogueSystem_->SetOpacity(dialogueBoxOpacity_);
 		phaseDialogueSystem_->SetOpacity(dialogueBoxOpacity_);
-	}
-	if (ImGui::SliderFloat("Defeat dialogue opacity", &defeatedDialogueOpacity_, 0.0f, 1.0f, "%.2f")) {
-		victoryDialogueSystem_->SetOpacity(defeatedDialogueOpacity_);
+		victoryDialogueSystem_->SetOpacity(dialogueBoxOpacity_);
 	}
 	const char* phaseName = "Phase 1";
 	if (bossPhaseState_ == BossPhaseState::kDialogue) { phaseName = "Phase dialogue"; }
@@ -1206,6 +1446,7 @@ void GameScene::UpdateTitle() {
 			flowState_ = FlowState::kTitleLogoFadeIn;
 			titleFadeTimer_ = 0.0f;
 			titleLogo_->SetColor({1.0f, 1.0f, 1.0f, 0.0f});
+			RequestBgm(BgmTrack::kNovusOrdoSeclorum);
 		}
 		break;
 	}
@@ -1244,6 +1485,7 @@ void GameScene::UpdateTitle() {
 		updateIdleMovement();
 		if (Input::GetInstance()->TriggerKey(DIK_SPACE) ||
 		    GamepadInput::IsTriggered(GamepadInput::ReadPlayerOne(), XINPUT_GAMEPAD_A)) {
+			PlayTitleConfirmCue();
 			flowState_ = FlowState::kTitleFadeOut;
 			titleFadeTimer_ = 0.0f;
 			titleStartBlinkTimer_ = 0.0f;
@@ -1381,15 +1623,16 @@ void GameScene::Draw() {
 	if (flowState_ == FlowState::kPlay) { DrawHealthBars(); }
 	if (flowState_ == FlowState::kPlay && dialogueSystem_ != nullptr) { dialogueSystem_->Draw(); }
 	if (flowState_ == FlowState::kPlay && phaseDialogueSystem_ != nullptr) { phaseDialogueSystem_->Draw(); }
-	// Draw the active speaker last so the phase-two panel cannot cover its ring
-	// or miniature. This now matches the first-encounter dialogue layering.
-	if (flowState_ == FlowState::kPlay) { DrawDialogueSpeaker(); }
 	if (flowState_ == FlowState::kPlay && victoryDialogueSystem_ != nullptr) { victoryDialogueSystem_->Draw(); }
+	// Draw the active speaker last so the phase-two panel cannot cover its ring
+	// or miniature. This applies to encounter, phase-two, and victory dialogue.
+	if (flowState_ == FlowState::kPlay) { DrawDialogueSpeaker(); }
 	DrawTitleSequence();
 	DrawEndOverlay();
 }
 
 GameScene::~GameScene() {
+	StopAllAudio();
 	for (Sprite*& rangeSprite : bossRangeSprites_) {
 		delete rangeSprite;
 		rangeSprite = nullptr;

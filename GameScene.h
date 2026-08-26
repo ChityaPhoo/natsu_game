@@ -7,6 +7,7 @@
 #include "Skydome.h"
 #include <array>
 #include <cstddef>
+#include <cstdint>
 
 class GameScene {
 public:
@@ -59,6 +60,11 @@ private:
 		KamataEngine::Vector3 rotation = {};
 		KamataEngine::Vector3 scale = {1.0f, 1.0f, 1.0f};
 	};
+	struct AudioClip {
+		uint32_t soundHandle = 0;
+		bool loaded = false;
+	};
+	enum class BgmTrack { kNone, kNovusOrdoSeclorum, kPhaseOneRequiem, kPhaseTwoGothic };
 
 	void StartBossEncounter();
 	void StartBossCombat();
@@ -103,6 +109,20 @@ private:
 	    const KamataEngine::Vector2& screenCenter,
 	    float distance);
 	void DrawDialogueSpeaker();
+	void InitializeAudio();
+	void UpdateAudio();
+	void RequestBgm(BgmTrack track);
+	void PlayTitleConfirmCue();
+	void UpdateFootstepAudio(bool movementEnabled);
+	void UpdatePlayerActionAudio();
+	void UpdateBossActionAudio();
+	void UpdateDialogueAudio();
+	void PlayPlayerDamageCue();
+	void PlayBossImpactCue();
+	void PlayBossDefeatCue();
+	void PlayResultCue();
+	void StopAllAudio();
+	const AudioClip* GetBgmClip(BgmTrack track) const;
 
 	// =====================================================================
 	// Game-flow tuning. These constants are the main place to adjust the
@@ -192,20 +212,54 @@ private:
 	static inline const float kBossDefeatEffectDuration = 4.50f;
 	static inline const float kScreenFadeDuration = 1.80f;
 	static inline const float kResultLogoFadeInDuration = 2.25f;
+	static inline const float kResultPromptDelay = 1.25f;
+	static inline const float kResultPromptFadeInDuration = 0.55f;
 	static inline const float kResultLogoFadeOutDuration = 1.50f;
 	static inline const char* kGameOverSpriteFile = "gameover.png";
 	static inline const char* kGameClearSpriteFile = "gameclear.png";
 	static inline const float kResultSpriteWidth = 720.0f;
 	static inline const float kResultSpriteHeight = 256.0f;
 
+	// Audio files are relative to Resources/. The three music tracks are kept
+	// separate so scene changes can crossfade without restarting the same track.
+	static inline const char* kNovusOrdoSeclorumFile = "bgm/novus_ordo_seclorum.wav";
+	static inline const char* kPhaseOneRequiemFile = "bgm/requiem_per_un_tradimento.wav";
+	static inline const char* kPhaseTwoGothicFile = "bgm/gothic.wav";
+	static inline const char* kGameOverCueFile = "sfx/gameover_church_bell.wav";
+	static inline const char* kGameClearCueFile = "sfx/gameclear_victory_fanfare.wav";
+	static inline const char* kTitleConfirmCueFile = "sfx/title_confirm.wav";
+	static inline const char* kFootstepCueFile = "sfx/concrete_footstep.wav";
+	static inline const char* kPlayerDamageCueFile = "sfx/player_damage.wav";
+	static inline const char* kSwordSwingCueFile = "sfx/sword_swing.wav";
+	static inline const char* kDialogueBlipCueFile = "sfx/dialogue_blip.wav";
+	static inline const char* kPlayerJumpDashCueFile = "sfx/player_jump_dash.wav";
+	static inline const char* kBossMoveCueFile = "sfx/boss_move.wav";
+	static inline const char* kBossImpactCueFile = "sfx/boss_impact.wav";
+	static inline const char* kBossDefeatCueFile = "sfx/boss_defeat_magic_death.wav";
+	static inline const char* kGameOverFallbackFile = "mokugyo.wav";
+	static inline const char* kGameClearFallbackFile = "fanfare.wav";
+	static inline const float kBgmVolume = 0.38f;
+	static inline const float kResultCueVolume = 0.82f;
+	static inline const float kTitleConfirmCueVolume = 0.72f;
+	static inline const float kFootstepCueVolume = 0.30f;
+	static inline const float kPlayerDamageCueVolume = 0.62f;
+	static inline const float kSwordSwingCueVolume = 0.52f;
+	static inline const float kDialogueBlipCueVolume = 0.24f;
+	static inline const float kPlayerJumpDashCueVolume = 0.23f;
+	static inline const float kBossMoveCueVolume = 0.20f;
+	static inline const float kBossImpactCueVolume = 0.27f;
+	static inline const float kBossDefeatCueVolume = 0.52f;
+	static inline const float kFootstepMinimumSpeed = 0.035f;
+	static inline const float kBgmCrossfadeDuration = 1.20f;
+
 	// =====================================================================
 	// Combat tuning: maximum health and all currently implemented damage.
 	// =====================================================================
 	static inline const float kDamageInvincibilityDuration = 0.75f;
 	static inline const int kDefaultPlayerMaximumHealth = 10;
-	static inline const int kDefaultBossMaximumHealth = 25;
+	static inline const int kDefaultBossMaximumHealth = 30;
 	// Health is measured in successful hits for now: every damaging attack
-	// removes one HP, so these defaults are exactly 10 and 25 hits to defeat.
+	// removes one HP, so these defaults are exactly 10 and 30 hits to defeat.
 	static inline const int kPlayerAttackDamage = 1;
 	static inline const int kBossBodyDamage = 1;
 	static inline const int kScytheDamage = 1;
@@ -307,6 +361,27 @@ private:
 	MiniatureSrt bossHealthMiniatureSrt_;
 	MiniatureSrt dialogueSpeakerMiniatureSrt_;
 	std::array<KamataEngine::Sprite*, 5> bossRangeSprites_ = {};
+	AudioClip novusOrdoSeclorumClip_;
+	AudioClip phaseOneRequiemClip_;
+	AudioClip phaseTwoGothicClip_;
+	AudioClip gameOverCueClip_;
+	AudioClip gameClearCueClip_;
+	AudioClip titleConfirmCueClip_;
+	AudioClip footstepCueClip_;
+	AudioClip playerDamageCueClip_;
+	AudioClip swordSwingCueClip_;
+	AudioClip dialogueBlipCueClip_;
+	AudioClip playerJumpDashCueClip_;
+	AudioClip bossMoveCueClip_;
+	AudioClip bossImpactCueClip_;
+	AudioClip bossDefeatCueClip_;
+	BgmTrack currentBgmTrack_ = BgmTrack::kNone;
+	BgmTrack nextBgmTrack_ = BgmTrack::kNone;
+	uint32_t currentBgmVoice_ = 0;
+	uint32_t nextBgmVoice_ = 0;
+	uint32_t resultCueVoice_ = 0;
+	uint32_t footstepVoice_ = 0;
+	float bgmCrossfadeTimer_ = 0.0f;
 	FlowState flowState_ = FlowState::kIntroFadeIn;
 	EndType endType_ = EndType::kNone;
 	EndPhase endPhase_ = EndPhase::kNone;
@@ -329,7 +404,6 @@ private:
 	float displayedPlayerHealthRatio_ = 1.0f;
 	float displayedBossHealthRatio_ = 1.0f;
 	float dialogueBoxOpacity_ = 0.90f;
-	float defeatedDialogueOpacity_ = 0.98f;
 	KamataEngine::Vector3 defeatCameraBase_ = {};
 	uint32_t effectRandomState_ = 0x9E3779B9u;
 	uint32_t slowMotionFrameCounter_ = 0;
@@ -348,4 +422,10 @@ private:
 	bool bossEncounterStarted_ = false;
 	bool bossDialogueStarted_ = false;
 	bool bossAIStarted_ = false;
+	bool currentBgmVoiceActive_ = false;
+	bool nextBgmVoiceActive_ = false;
+	bool bgmCrossfading_ = false;
+	bool resultCueVoiceActive_ = false;
+	bool footstepVoiceActive_ = false;
+	bool resultCuePlayed_ = false;
 };

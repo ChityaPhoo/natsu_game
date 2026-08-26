@@ -58,6 +58,7 @@ void DialogueSystem::Initialize(
 	phaseTimer_ = 0.0f;
 	advanceIndicatorTimer_ = 0.0f;
 	currentVisibility_ = 0.0f;
+	pageStarted_ = false;
 	phase_ = Phase::kIdle;
 }
 
@@ -90,6 +91,7 @@ void DialogueSystem::SetPageContentSprites(
 
 void DialogueSystem::Start() {
 	currentPage_ = 0;
+	pageStarted_ = false;
 	phaseTimer_ = 0.0f;
 	advanceIndicatorTimer_ = 0.0f;
 	for (size_t index = 0; index < pageSprites_.size(); ++index) {
@@ -104,6 +106,7 @@ void DialogueSystem::Start() {
 		return;
 	}
 	phase_ = Phase::kAppearing;
+	pageStarted_ = true;
 	ApplyCurrentPageVisual(0.0f);
 }
 
@@ -141,6 +144,7 @@ void DialogueSystem::Update() {
 				phase_ = Phase::kFinished;
 			} else {
 				phase_ = Phase::kAppearing;
+				pageStarted_ = true;
 				ApplyCurrentPageVisual(0.0f);
 			}
 		}
@@ -148,6 +152,12 @@ void DialogueSystem::Update() {
 	}
 	}
 	UpdateAdvanceIndicatorVisual();
+}
+
+bool DialogueSystem::ConsumePageStarted() {
+	const bool started = pageStarted_;
+	pageStarted_ = false;
+	return started;
 }
 
 void DialogueSystem::ApplyCurrentPageVisual(float visibility) {

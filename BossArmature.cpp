@@ -1254,6 +1254,12 @@ bool BossArmature::ConsumeSlamImpact() {
 	return impact;
 }
 
+BossArmature::SoundCue BossArmature::ConsumeSoundCue() {
+	const SoundCue cue = pendingSoundCue_;
+	pendingSoundCue_ = SoundCue::kNone;
+	return cue;
+}
+
 void BossArmature::UpdateAI() {
 	if (controlMode_ != ControlMode::kPlayTest || !aiEnabled_) { return; }
 
@@ -1407,6 +1413,7 @@ void BossArmature::EnterAIState(AIState state) {
 		StartAnimation(AnimationType::kNormalAttack);
 		break;
 	case AIState::kRetreat:
+		pendingSoundCue_ = SoundCue::kMove;
 		retreatTimer_ = retreatDuration_;
 		{
 			// Prefer a landing point one mid-range band away from the player. If
@@ -1906,6 +1913,22 @@ void BossArmature::StartAnimation(AnimationType animation) {
 	}
 	activeAnimation_ = animation;
 	animationTime_ = 0.0f;
+	switch (animation) {
+	case AnimationType::kPhaseTwoGroundWave:
+	case AnimationType::kPhaseTwoPillars:
+		pendingSoundCue_ = SoundCue::kImpact;
+		break;
+	case AnimationType::kNormalAttack:
+	case AnimationType::kScytheThrow:
+	case AnimationType::kSpinAttack:
+	case AnimationType::kVerticalHook:
+	case AnimationType::kJumpSlam:
+	case AnimationType::kPhaseTwoUppercut:
+		pendingSoundCue_ = SoundCue::kMove;
+		break;
+	case AnimationType::kNone:
+		break;
+	}
 	slamImpactPending_ = false;
 	shadowPillarTargetLocked_.fill(false);
 	isScytheDetached_ = false;

@@ -26,6 +26,7 @@ public:
 	void SetBaseColor(const KamataEngine::Vector4& color);
 	bool IsActive() const;
 	bool IsFinished() const { return phase_ == Phase::kFinished; }
+	bool ConsumePageStarted();
 	uint32_t GetCurrentPage() const { return currentPage_; }
 	float GetCurrentVisibility() const { return currentVisibility_; }
 	float GetCurrentSlideOffset() const { return kSlideDistance * (1.0f - currentVisibility_); }
@@ -62,4 +63,5 @@ private:
 	float opacity_ = 1.0f;
 	float currentVisibility_ = 0.0f;
 	float advanceIndicatorTimer_ = 0.0f;
+	bool pageStarted_ = false;
 };

@@ -7,6 +7,8 @@
 
 class BossArmature {
 public:
+	enum class SoundCue { kNone, kMove, kImpact };
+
 	struct CollisionBox {
 		KamataEngine::Vector3 min = {};
 		KamataEngine::Vector3 max = {};
@@ -40,6 +42,7 @@ public:
 	    std::size_t index, CollisionBox& hitbox, float& telegraphProgress,
 	    bool& damaging) const;
 	bool ConsumeSlamImpact();
+	SoundCue ConsumeSoundCue();
 	KamataEngine::Vector3 GetPosition() const { return joints_[kRoot].worldPosition; }
 	float GetCloseDistance() const { return closeDistance_; }
 	float GetMidDistance() const { return midDistance_; }
@@ -251,6 +254,7 @@ private:
 	bool aiEnabled_ = false;
 	bool phaseTransitionActive_ = false;
 	bool slamImpactPending_ = false;
+	SoundCue pendingSoundCue_ = SoundCue::kNone;
 	bool isPhaseTwo_ = false;
 	std::array<float, kShadowPillarCount> shadowPillarTargetX_ = {};
 	std::array<bool, kShadowPillarCount> shadowPillarTargetLocked_ = {};

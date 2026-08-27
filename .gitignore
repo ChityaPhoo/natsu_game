@@ -17,7 +17,7 @@ Generated/
 [Rr]elease/
 x64/
 *.obj
-!Resources/hammer/hammer.obj
+!Resources/**/*.obj
 *.pch
 *.pdb
 *.ilk

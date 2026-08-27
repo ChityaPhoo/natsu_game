@@ -14,7 +14,7 @@ using namespace KamataEngine;
 
 void GameScene::Initialize() {
 	mapChipField_ = new MapChipField();
-	mapChipField_->Initialize("mapChip", "Resources/mapchip.csv", 1.0f, 1.0f);
+	mapChipField_->Initialize("environment_map", "Resources/environment/mapchip.csv", 1.0f, 1.0f);
 
 	player_ = new Player();
 	player_->Initialize();
@@ -64,8 +64,8 @@ void GameScene::Initialize() {
 	    {kDialogueBoxCropWidth, kDialogueBoxCropHeight});
 	dialogueSystem_->SetPageContentSprites(
 	    {
-	        "dialogue/dia1.png", "dialogue/dia2.png", "dialogue/dia3.png",
-	        "dialogue/dia4.png", "dialogue/dia5.png",
+	        "ui/dialogue/dia1.png", "ui/dialogue/dia2.png", "ui/dialogue/dia3.png",
+	        "ui/dialogue/dia4.png", "ui/dialogue/dia5.png",
 	    },
 	    {kDialogueContentWidth, kDialogueContentHeight},
 	    {kDialogueContentOffsetX, kDialogueContentOffsetY});
@@ -78,8 +78,8 @@ void GameScene::Initialize() {
 	    {kDialogueBoxCropWidth, kDialogueBoxCropHeight});
 	phaseDialogueSystem_->SetPageContentSprites(
 	    {
-	        "dialogue/dia6.png", "dialogue/dia7.png", "dialogue/dia8.png",
-	        "dialogue/dia9.png", "dialogue/dia10.png", "dialogue/dia11.png",
+	        "ui/dialogue/dia6.png", "ui/dialogue/dia7.png", "ui/dialogue/dia8.png",
+	        "ui/dialogue/dia9.png", "ui/dialogue/dia10.png", "ui/dialogue/dia11.png",
 	    },
 	    {kDialogueContentWidth, kDialogueContentHeight},
 	    {kDialogueContentOffsetX, kDialogueContentOffsetY});
@@ -91,15 +91,15 @@ void GameScene::Initialize() {
 	    {kDialogueBoxCropX, kDialogueBoxCropY},
 	    {kDialogueBoxCropWidth, kDialogueBoxCropHeight});
 	victoryDialogueSystem_->SetPageContentSprites(
-	    {"dialogue/dia4.png"},
+	    {"ui/dialogue/dia4.png"},
 	    {kDialogueContentWidth, kDialogueContentHeight},
 	    {kDialogueContentOffsetX, kDialogueContentOffsetY});
 	dialogueSystem_->SetOpacity(dialogueBoxOpacity_);
 	phaseDialogueSystem_->SetOpacity(dialogueBoxOpacity_);
 	victoryDialogueSystem_->SetOpacity(dialogueBoxOpacity_);
 	defeatParticleModel_ = Model::CreateSphere(6, 6);
-	bossAttackModel_ = Model::CreateFromOBJ("boss_Attack", true);
-	bossAttackWaveModel_ = Model::CreateFromOBJ("boss_AttackWave", true);
+	bossAttackModel_ = Model::CreateFromOBJ("boss_attack_pillar", true);
+	bossAttackWaveModel_ = Model::CreateFromOBJ("boss_attack_wave", true);
 	defeatParticleColor_.Initialize();
 	defeatParticleColor_.SetColor({1.0f, 0.24f, 0.06f, 0.90f});
 	for (DefeatParticle& particle : defeatParticles_) {
@@ -114,7 +114,7 @@ void GameScene::Initialize() {
 	introSprite_ = Sprite::Create(introSpriteTexture, {0.0f, 0.0f}, {introSpriteBaseColor_.x, introSpriteBaseColor_.y, introSpriteBaseColor_.z, 0.0f});
 	introSprite_->SetSize({static_cast<float>(WinApp::kWindowWidth), static_cast<float>(WinApp::kWindowHeight)});
 
-	const uint32_t titleLogoTexture = TextureManager::Load("titleFont/titlelogo.png");
+	const uint32_t titleLogoTexture = TextureManager::Load("ui/title/titlelogo.png");
 	titleLogo_ = Sprite::Create(
 	    titleLogoTexture,
 	    {static_cast<float>(WinApp::kWindowWidth) * 0.5f, kTitleLogoBaseY},
@@ -160,8 +160,8 @@ void GameScene::Initialize() {
 	    gameplayUiTwoTexture, {0.0f, 0.0f}, {1.0f, 1.0f, 1.0f, 0.0f}, {0.5f, 0.5f});
 	gameplayUiTwoSprite_->SetSize({kGameplayUiWidth, kGameplayUiHeight});
 	const uint32_t healthBarTexture = TextureManager::Load("white1x1.png");
-	const uint32_t playerHealthFillTexture = TextureManager::Load("hp.png");
-	const uint32_t bossHealthFillTexture = TextureManager::Load("boss hp.png");
+	const uint32_t playerHealthFillTexture = TextureManager::Load("ui/hud/player_health_fill.png");
+	const uint32_t bossHealthFillTexture = TextureManager::Load("ui/hud/boss_health_fill.png");
 	titleCoverSprite_ = Sprite::Create(healthBarTexture, {0.0f, 0.0f}, {0.0f, 0.0f, 0.0f, 1.0f});
 	titleCoverSprite_->SetSize({static_cast<float>(WinApp::kWindowWidth), static_cast<float>(WinApp::kWindowHeight)});
 	playerHealthFrame_ = Sprite::Create(healthBarTexture, {0.0f, 0.0f}, {0.03f, 0.02f, 0.02f, 0.0f}, {0.0f, 0.5f});
@@ -494,15 +494,11 @@ void GameScene::InitializeAudio() {
 		clip.loaded = true;
 		return true;
 	};
-	auto loadWithFallback = [&](AudioClip& clip, const char* preferredPath, const char* fallbackPath) {
-		if (!tryLoad(clip, preferredPath)) { tryLoad(clip, fallbackPath); }
-	};
-
 	tryLoad(novusOrdoSeclorumClip_, kNovusOrdoSeclorumFile);
 	tryLoad(phaseOneRequiemClip_, kPhaseOneRequiemFile);
 	tryLoad(phaseTwoGothicClip_, kPhaseTwoGothicFile);
-	loadWithFallback(gameOverCueClip_, kGameOverCueFile, kGameOverFallbackFile);
-	loadWithFallback(gameClearCueClip_, kGameClearCueFile, kGameClearFallbackFile);
+	tryLoad(gameOverCueClip_, kGameOverCueFile);
+	tryLoad(gameClearCueClip_, kGameClearCueFile);
 	tryLoad(titleConfirmCueClip_, kTitleConfirmCueFile);
 	tryLoad(footstepCueClip_, kFootstepCueFile);
 	tryLoad(playerDamageCueClip_, kPlayerDamageCueFile);

@@ -71,22 +71,20 @@ void BossArmature::Initialize() {
 	InitializePhaseTwoGroundWaveClip();
 	InitializePhaseTwoPillarsClip();
 
-	// The float_* resources are authored around their own local origins. Attach
+	// The boss body resources are authored around their own local origins. Attach
 	// their useful pivots to the existing armature instead of treating their OBJ
 	// coordinates as already assembled world-space geometry.
 	InitializeLocalModelPart(
-	    modelParts_[0], "float_Body", kBody, {0.0f, 0.138622f, 0.0f},
+	    modelParts_[0], "boss_body", kBody, {0.0f, 0.138622f, 0.0f},
 	    {2.50f, 2.50f, 2.50f}, {0.0f, -1.80f, 0.0f});
 	InitializeLocalModelPart(
-	    modelParts_[1], "float_Head", kHead, {0.0f, 0.097571f, 0.0f},
+	    modelParts_[1], "boss_head", kHead, {0.0f, 0.097571f, 0.0f},
 	    {1.80f, 1.80f, 1.80f}, {0.0f, -1.10f, 0.0f});
 	InitializeLocalModelPart(
-	    // The folder names are reversed: float_R_arm contains Palm_L.
-	    modelParts_[2], "float_R_arm", kLeftShoulder, {0.0154f, 0.0404f, 0.1050f},
+	    modelParts_[2], "boss_left_arm", kLeftShoulder, {0.0154f, 0.0404f, 0.1050f},
 	    {3.00f, 3.00f, 3.00f}, {}, 1.0f);
 	InitializeLocalModelPart(
-	    // The folder names are reversed: float_L_arm contains Palm_R.
-	    modelParts_[3], "float_L_arm", kRightShoulder, {0.0158f, 0.0651f, 0.0f},
+	    modelParts_[3], "boss_right_arm", kRightShoulder, {0.0158f, 0.0651f, 0.0f},
 	    {3.00f, 3.00f, 3.00f}, {}, -1.0f);
 	// The model was authored front-on. A quarter-turn gives it a side profile;
 	// the root joint's existing 0/PI facing rotation then turns that profile
@@ -95,9 +93,9 @@ void BossArmature::Initialize() {
 		part.localRotation.y = -0.5f * std::numbers::pi_v<float>;
 		part.defaultLocalRotation = part.localRotation;
 	}
-	InitializeArticulatedArm(modelParts_[2], "float_R_arm", kLeftElbow, kLeftHand);
-	InitializeArticulatedArm(modelParts_[3], "float_L_arm", kRightElbow, kRightHand);
-	weaponModel_ = Model::CreateFromOBJ("hammer", true);
+	InitializeArticulatedArm(modelParts_[2], "boss_left_arm", kLeftElbow, kLeftHand);
+	InitializeArticulatedArm(modelParts_[3], "boss_right_arm", kRightElbow, kRightHand);
+	weaponModel_ = Model::CreateFromOBJ("boss_weapon", true);
 	weaponTransform_.Initialize();
 	headPortraitTransform_.Initialize();
 	jointSphereModel_ = Model::CreateSphere(8, 8);
@@ -426,7 +424,7 @@ void BossArmature::DrawHeadPortrait(
 
 Vector3 BossArmature::GetHeadPortraitCenter() const {
 	Vector3 center = joints_[kHead].worldPosition;
-	// float_Head is attached below the head joint by this authored offset.
+	// The boss head model is attached below the head joint by this authored offset.
 	center.y -= 1.10f;
 	return center;
 }

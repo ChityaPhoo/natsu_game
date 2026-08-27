@@ -14,8 +14,8 @@ void Player::Initialize() {
 	portraitColor_.Initialize();
 	portraitColor_.SetColor({1.0f, 1.0f, 1.0f, 1.0f});
 	attackEffectTransform_.Initialize();
-	model_ = Model::CreateFromOBJ("player", true);
-	attackEffectModel_ = Model::CreateFromOBJ("sword", true);
+	model_ = Model::CreateFromOBJ("player_body", true);
+	attackEffectModel_ = Model::CreateFromOBJ("player_weapon", true);
 	velocity_ = {};
 	onGround_ = false;
 	jumpsRemaining_ = 2;

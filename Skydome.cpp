@@ -3,7 +3,7 @@
 
 using namespace KamataEngine;
 
-void Skydome::Initialize() { worldTransform_.Initialize(); model_ = Model::CreateFromOBJ("SkyDome", true); }
+void Skydome::Initialize() { worldTransform_.Initialize(); model_ = Model::CreateFromOBJ("environment_sky", true); }
 
 void Skydome::Update(const Camera& camera) {
 	// Keep the camera centered inside the dome while the level scrolls. This

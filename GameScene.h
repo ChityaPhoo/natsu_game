@@ -145,7 +145,7 @@ private:
 	// Full-screen 1280x720 intro artwork. It fades over the black title cover,
 	// then the existing title sequence continues normally.
 	// =====================================================================
-	static inline const char* kIntroSpriteFile = "titleFont/intro.png";
+	static inline const char* kIntroSpriteFile = "ui/title/intro.png";
 	static inline const float kIntroSpriteFadeInDuration = 2.00f;
 	static inline const float kIntroSpriteStayDuration = 2.50f;
 	static inline const float kIntroSpriteFadeOutDuration = 2.00f;
@@ -157,7 +157,7 @@ private:
 	static inline const float kTitleStartBlinkInterval = 0.06f;
 
 	// Title idle movement and bottom prompt tuning.
-	static inline const char* kTitlePromptSpriteFile = "titleFont/titleui.png";
+	static inline const char* kTitlePromptSpriteFile = "ui/title/titleui.png";
 	static inline const float kTitleLogoBaseY = 165.0f;
 	static inline const float kTitleLogoIdleMoveAmount = 8.0f;
 	static inline const float kTitleLogoIdleCycleDuration = 2.40f;
@@ -169,8 +169,8 @@ private:
 
 	// Background tuning. Two screen-sized copies wrap horizontally. The scroll
 	// ratio is relative to camera movement: 0 is fixed and 1 matches the world.
-	static inline const char* kBackgroundSpriteFile = "BackGround/background.png";
-	static inline const char* kMoonSpriteFile = "BackGround/moon1.png";
+	static inline const char* kBackgroundSpriteFile = "environment/background/background.png";
+	static inline const char* kMoonSpriteFile = "environment/background/moon.png";
 	static inline const float kBackgroundSpriteWidth = 870.4f;
 	static inline const float kBackgroundSpriteHeight = 489.6f;
 	static inline const float kBackgroundSpritePositionY = 230.4f;
@@ -184,8 +184,8 @@ private:
 
 	// Walking tutorial layout. The images live at fixed world positions, so they
 	// scroll across the screen and the player walks past them like level objects.
-	static inline const char* kGameplayUiOneSpriteFile = "titleFont/gameplayui1.png";
-	static inline const char* kGameplayUiTwoSpriteFile = "titleFont/gameplayui2.png";
+	static inline const char* kGameplayUiOneSpriteFile = "ui/tutorial/gameplayui1.png";
+	static inline const char* kGameplayUiTwoSpriteFile = "ui/tutorial/gameplayui2.png";
 	static inline const float kGameplayUiOneWorldX = 34.05f;
 	static inline const float kGameplayUiTwoWorldX = 56.75f;
 	static inline const float kGameplayUiWorldY = 9.20f;
@@ -195,7 +195,7 @@ private:
 	static inline const float kGameplayUiIdleCycleDuration = 2.20f;
 
 	static inline const float kHealthBarAppearDuration = 1.20f;
-	static inline const char* kCharacterRingSpriteFile = "character_ring.png";
+	static inline const char* kCharacterRingSpriteFile = "ui/hud/character_ring.png";
 	static inline const float kPlayerHealthRingSize = 82.0f;
 	static inline const float kBossHealthRingSize = 88.0f;
 	static inline const float kPlayerPortraitCameraDistance = 5.0f;
@@ -215,29 +215,27 @@ private:
 	static inline const float kResultPromptDelay = 1.25f;
 	static inline const float kResultPromptFadeInDuration = 0.55f;
 	static inline const float kResultLogoFadeOutDuration = 1.50f;
-	static inline const char* kGameOverSpriteFile = "gameover.png";
-	static inline const char* kGameClearSpriteFile = "gameclear.png";
+	static inline const char* kGameOverSpriteFile = "ui/results/gameover.png";
+	static inline const char* kGameClearSpriteFile = "ui/results/gameclear.png";
 	static inline const float kResultSpriteWidth = 720.0f;
 	static inline const float kResultSpriteHeight = 256.0f;
 
 	// Audio files are relative to Resources/. The three music tracks are kept
 	// separate so scene changes can crossfade without restarting the same track.
-	static inline const char* kNovusOrdoSeclorumFile = "bgm/novus_ordo_seclorum.wav";
-	static inline const char* kPhaseOneRequiemFile = "bgm/requiem_per_un_tradimento.wav";
-	static inline const char* kPhaseTwoGothicFile = "bgm/gothic.wav";
-	static inline const char* kGameOverCueFile = "sfx/gameover_church_bell.wav";
-	static inline const char* kGameClearCueFile = "sfx/gameclear_victory_fanfare.wav";
-	static inline const char* kTitleConfirmCueFile = "sfx/title_confirm.wav";
-	static inline const char* kFootstepCueFile = "sfx/concrete_footstep.wav";
-	static inline const char* kPlayerDamageCueFile = "sfx/player_damage.wav";
-	static inline const char* kSwordSwingCueFile = "sfx/sword_swing.wav";
-	static inline const char* kDialogueBlipCueFile = "sfx/dialogue_blip.wav";
-	static inline const char* kPlayerJumpDashCueFile = "sfx/player_jump_dash.wav";
-	static inline const char* kBossMoveCueFile = "sfx/boss_move.wav";
-	static inline const char* kBossImpactCueFile = "sfx/boss_impact.wav";
-	static inline const char* kBossDefeatCueFile = "sfx/boss_defeat_magic_death.wav";
-	static inline const char* kGameOverFallbackFile = "mokugyo.wav";
-	static inline const char* kGameClearFallbackFile = "fanfare.wav";
+	static inline const char* kNovusOrdoSeclorumFile = "sound/bgm/novus_ordo_seclorum.wav";
+	static inline const char* kPhaseOneRequiemFile = "sound/bgm/requiem_per_un_tradimento.wav";
+	static inline const char* kPhaseTwoGothicFile = "sound/bgm/gothic.wav";
+	static inline const char* kGameOverCueFile = "sound/sfx/gameover_church_bell.wav";
+	static inline const char* kGameClearCueFile = "sound/sfx/gameclear_victory_fanfare.wav";
+	static inline const char* kTitleConfirmCueFile = "sound/sfx/title_confirm.wav";
+	static inline const char* kFootstepCueFile = "sound/sfx/concrete_footstep.wav";
+	static inline const char* kPlayerDamageCueFile = "sound/sfx/player_damage.wav";
+	static inline const char* kSwordSwingCueFile = "sound/sfx/sword_swing.wav";
+	static inline const char* kDialogueBlipCueFile = "sound/sfx/dialogue_blip.wav";
+	static inline const char* kPlayerJumpDashCueFile = "sound/sfx/player_jump_dash.wav";
+	static inline const char* kBossMoveCueFile = "sound/sfx/boss_move.wav";
+	static inline const char* kBossImpactCueFile = "sound/sfx/boss_impact.wav";
+	static inline const char* kBossDefeatCueFile = "sound/sfx/boss_defeat_magic_death.wav";
 	static inline const float kBgmVolume = 0.38f;
 	static inline const float kResultCueVolume = 0.82f;
 	static inline const float kTitleConfirmCueVolume = 0.72f;
@@ -284,7 +282,7 @@ private:
 	static inline const uint32_t kBossPhaseDialoguePageCount = 6;
 	// Regular encounter/phase dialogue box. The PNG includes a large transparent
 	// canvas, so these values crop the visible panel before fitting it to 1/4 screen.
-	static inline const char* kDialogueBoxSpriteFile = "dialougueBoxReal.png";
+	static inline const char* kDialogueBoxSpriteFile = "ui/dialogue/dialogue_box.png";
 	static inline const float kDialogueBoxCropX = 147.0f;
 	static inline const float kDialogueBoxCropY = 653.0f;
 	static inline const float kDialogueBoxCropWidth = 1263.0f;

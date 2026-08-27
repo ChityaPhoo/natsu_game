@@ -42,7 +42,7 @@ void DialogueSystem::Initialize(
 		pageSprites_.push_back(pageSprite);
 		pageBaseColors_.push_back(baseColor);
 	}
-	const uint32_t indicatorTexture = TextureManager::Load("particle/circle.png");
+	const uint32_t indicatorTexture = TextureManager::Load("ui/dialogue/advance_circle.png");
 	for (std::size_t index = 0; index < advanceIndicators_.size(); ++index) {
 		const float horizontalOffset =
 		    (static_cast<float>(index) - 1.0f) * kAdvanceIndicatorSpacing;

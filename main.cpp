@@ -6,7 +6,7 @@
 using namespace KamataEngine;
 
 int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
-	Initialize(L"Summer Game");
+	Initialize(L"LE2C_17_チッ_ヤ_プー_Silent_Knight");
 	DirectXCommon* directXCommon = DirectXCommon::GetInstance();
 #ifdef USE_IMGUI
 	ImGuiManager* imGuiManager = ImGuiManager::GetInstance();
